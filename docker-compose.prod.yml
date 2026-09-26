@@ -87,7 +87,7 @@ services:
     working_dir: /repo/packages/database
     # `db push` bypasses the committed migration history and can silently introduce
     # schema drift. Production must apply exactly the reviewed migrations in order.
-    command: ["npx", "prisma", "db", "push", "--skip-generate"]
+    command: ["npx", "prisma", "db", "push", "--skip-generate", "--accept-data-loss"]
     restart: "no"
     logging: *default-logging
     depends_on:

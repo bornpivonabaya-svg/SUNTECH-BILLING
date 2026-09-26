@@ -1,0 +1,20 @@
+name: Auto Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Azure Host
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Remote Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: 68.210.187.104
+          username: mashupadmin
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            /opt/mashuphost/infrastructure/scripts/auto-deploy.sh
