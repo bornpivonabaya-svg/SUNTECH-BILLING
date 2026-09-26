@@ -43,8 +43,9 @@ if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
   echo "[$TIMESTAMP] [AUTO-DEPLOY] New update detected on GitHub origin/main!" >> "$LOG_FILE"
   echo "[$TIMESTAMP] Current: $LOCAL_HASH -> Remote: $REMOTE_HASH" >> "$LOG_FILE"
   
-  # Pull latest code
-  git pull origin main >> "$LOG_FILE" 2>&1
+  # Reset to latest code cleanly (preserves .env.production and untracked volumes)
+  git checkout -f main >> "$LOG_FILE" 2>&1
+  git reset --hard origin/main >> "$LOG_FILE" 2>&1
   
   # Execute production rebuild
   echo "[$TIMESTAMP] Running docker compose rebuild and migrations..." >> "$LOG_FILE"
