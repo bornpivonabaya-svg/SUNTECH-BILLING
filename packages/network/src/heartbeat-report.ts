@@ -20,6 +20,25 @@ export interface RouterHeartbeatMetrics {
   activeUsers?: number;
   routerOsVersion?: string;
   boardName?: string;
+  /** The management VPN as the router reports it; see parseVpnReport. */
+  vpnStatus?: "none" | "no-peer" | "waiting" | "connected";
+  vpnHandshakeAt?: Date;
+}
+
+/**
+ * The report's `wg` field: "0" no WireGuard interface, "1" an interface with no peer, "1," one
+ * that has never connected, "1,1m20s" (or "1,00:01:20") connected that long ago. A handshake
+ * older than 3 minutes means the tunnel is down again (WireGuard re-handshakes every 2).
+ */
+export function parseVpnReport(value: string | null, now = Date.now()): Pick<RouterHeartbeatMetrics, "vpnStatus" | "vpnHandshakeAt"> {
+  if (value === null) return {};
+  const [count, handshake] = value.trim().split(",", 2);
+  if (count === "0") return { vpnStatus: "none" };
+  if (count !== "1") return {};
+  if (handshake === undefined) return { vpnStatus: "no-peer" };
+  const ago = parseUptimeSeconds(handshake);
+  if (ago === undefined) return { vpnStatus: "waiting" };
+  return { vpnStatus: ago <= 180 ? "connected" : "waiting", vpnHandshakeAt: new Date(now - ago * 1000) };
 }
 
 /** True when a callback body is this report rather than a WireGuard public key. */
@@ -114,6 +133,8 @@ export function parseHeartbeatReport(body: string, query: Record<string, unknown
     const voltage = num(sensors["voltage"], 0, 100);
     if (voltage !== undefined) metrics.voltageV = voltage;
   }
+
+  Object.assign(metrics, parseVpnReport(get("wg")));
 
   for (const key of Object.keys(metrics) as (keyof RouterHeartbeatMetrics)[]) {
     if (metrics[key] === undefined) delete metrics[key];

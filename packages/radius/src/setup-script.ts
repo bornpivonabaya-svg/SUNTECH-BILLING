@@ -504,6 +504,9 @@ export function buildHeartbeatScript(callbackUrl: string): string {
     `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")})`,
     `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={}`,
     `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={}`,
+    // The management VPN (RouterOS 7): whether mkg-wg exists, and how long since its last
+    // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
+    `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
     `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
     "",
   ].join("\n");

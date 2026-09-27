@@ -44,6 +44,7 @@ interface RouterRow {
   diskTotalBytes: number | null;
   activeUsers: number | null;
   boardName: string | null;
+  vpnStatus: "none" | "no-peer" | "waiting" | "connected" | null;
   updatedAt: string;
   vpnIp: string | null;
   routerOsVersion: string | null;
@@ -148,6 +149,14 @@ function HealthStrip({ router }: { router: RouterRow }) {
   if (router.diskFreeBytes != null && router.diskTotalBytes) chips.push({ label: tr("Storage free"), value: `${mb(router.diskFreeBytes)} / ${mb(router.diskTotalBytes)}`, warn: (diskPct ?? 100) < 10 });
   if (router.activeUsers != null) chips.push({ label: tr("Users online"), value: String(router.activeUsers) });
   if (router.uptimeSeconds != null) chips.push({ label: tr("Up for"), value: formatUptime(router.uptimeSeconds)!.replace(/^up /, "") });
+  // The management VPN, as the router reports it. Without it, remote WinBox and live tools can't
+  // reach a router behind CGNAT (its health still arrives through the heartbeat).
+  if (router.vpnStatus)
+    chips.push(
+      router.vpnStatus === "connected"
+        ? { label: "VPN", value: tr("connected") }
+        : { label: "VPN", value: router.vpnStatus === "waiting" ? tr("not connecting") : tr("not set up"), warn: true }
+    );
   if (chips.length === 0) {
     // Online but no figures: the router checks in with the older script, which sends none.
     return router.status === "ONLINE" ? (
