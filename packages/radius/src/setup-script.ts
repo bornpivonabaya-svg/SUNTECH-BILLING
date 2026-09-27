@@ -512,9 +512,6 @@ function heartbeatOnEvent(callbackUrl: string): string {
 export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string, options: { hotspotCheck?: boolean } = {}): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
-  const portalSelfRepair = loginTemplateUrl
-    ? `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; ${aloginTemplateUrl ? `:do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}; ` : ""}};`
-    : `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}};`;
   return [
     `{`,
     // Self-repair, each change made only when something is actually wrong, so a healthy router
@@ -530,13 +527,9 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // the sign-in page). Exactly one pair of rules: any other count — none, or the duplicates an
     // earlier version added every minute — is cleared and replaced.
     `:do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]; /ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"; /ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"}} on-error={}`,
-    // Every hotspot profile: RADIUS on, and pointed at a folder that really has the sign-in page.
-    `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; :if ([:len [/file find name=($dir . "/login.html")]] = 0) do={:if ([:len [/file find name="flash/hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=flash/hotspot} else={:if ([:len [/file find name="hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=hotspot}}}; :if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`,
     `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
-    // An empty or cut-off sign-in page (a download interrupted mid-way) is removed, so the
-    // repair below fetches a fresh one: phones otherwise get no sign-in page at all.
-    `:do {:foreach f in=[/file find name~"hotspot/login.html"] do={:if ([/file get $f size] < 200) do={/file remove $f}}} on-error={}`,
-    portalSelfRepair,
+    // The sign-in page, in the folder each hotspot really uses (see portalRepair).
+    portalRepair(loginTemplateUrl, aloginTemplateUrl),
     // cpu-load is the last second's load, and this runs straight after the router fetched it over
     // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
     `:delay 3s`,
@@ -564,6 +557,31 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
  * the 4 KB its fetch returns.
  */
 const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find dst-host~"mashuphost"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :do {:local dir [/ip hotspot profile get [/ip hotspot get [find disabled=no] profile] html-directory]; :set c ($c . ";dir=" . $dir . ";lsize=" . [/file get [find name=($dir . "/login.html")] size])} on-error={}; :do {:local m [:parse ":return [/radius monitor 0 once as-value]"]; :local r [$m]; :set c ($c . ";rreq=" . ($r->"requests") . ";racc=" . ($r->"accepts") . ";rrej=" . ($r->"rejects") . ";rto=" . ($r->"timeouts"))} on-error={}; :set d ($d . "&hs=" . $c)} on-error={}`;
+
+/**
+ * Makes sure every hotspot can show the sign-in page. For each hotspot profile it reads the
+ * folder that profile really serves pages from (html-directory — "hotspot" or "flash/hotspot"
+ * depending on the board), and if that folder's login.html is missing or cut short (under 200
+ * bytes) it rebuilds the hotspot's default pages there (reset-html, for that exact hotspot) and
+ * downloads the ISP's sign-in and "you're online" pages into the same folder. A router with the
+ * page missing answers every phone with "Error 404 : Not Found", which Android shows as
+ * "Connected, no internet". Nothing is written when the page is fine. reset-html goes through
+ * :parse, so a version that words it differently fails that command alone, not the report.
+ */
+function portalRepair(loginUrl: string | undefined, aloginUrl: string | null): string {
+  const fetches = loginUrl
+    ? `:do {/tool fetch url="${loginUrl}" dst-path=($dir . "/login.html") check-certificate=no} on-error={}; ` +
+      (aloginUrl ? `:do {/tool fetch url="${aloginUrl}" dst-path=($dir . "/alogin.html") check-certificate=no} on-error={}; ` : "")
+    : "";
+  return (
+    `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; ` +
+    `:if ([:len $dir] = 0) do={:set dir "hotspot"; /ip hotspot profile set $p html-directory=hotspot}; ` +
+    `:local ok false; :local f [/file find name=($dir . "/login.html")]; ` +
+    `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:set ok true}}; ` +
+    `:if ($ok = false) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}; ${fetches}}; ` +
+    `:if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`
+  );
+}
 
 /** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */
 export function aloginUrlFor(loginTemplateUrl: string): string {

@@ -284,7 +284,21 @@ describe("router health report", () => {
       expect(report).toContain(probe);
     }
     expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })).not.toContain("&hs=");
-    // A broken sign-in page is removed before the repair that refetches a missing one.
-    expect(report.indexOf("[/file get $f size] < 200")).toBeLessThan(report.indexOf("/ip hotspot reset-html"));
+  });
+
+  it("repairs the sign-in page in the folder the hotspot really serves from", () => {
+    const login = "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template";
+    const report = buildHeartbeatScript(callbackUrl, login);
+    // Reads each profile's own html-directory, and treats missing or under-200-byte as broken.
+    expect(report).toContain(":local dir [/ip hotspot profile get $p html-directory]");
+    expect(report).toContain(':local f [/file find name=($dir . "/login.html")]');
+    expect(report).toContain("[/file get ($f->0) size] >= 200");
+    // Rebuilds that exact hotspot's pages through :parse, then downloads into the same folder.
+    expect(report).toContain(':local r [:parse ("/ip hotspot reset-html " . $h)]');
+    expect(report).toContain(`/tool fetch url="${login}" dst-path=($dir . "/login.html")`);
+    expect(report).toContain('dst-path=($dir . "/alogin.html")');
+    // No more guessing fixed folders.
+    expect(report).not.toContain('dst-path=flash/hotspot/login.html');
+    expect(report.indexOf("reset-html")).toBeLessThan(report.indexOf(`url="${login}"`));
   });
 });
