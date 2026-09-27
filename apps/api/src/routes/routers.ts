@@ -31,7 +31,7 @@ import {
   appFilterPortalHosts,
   routerRadiusHost,
   platformPublicAddress,
-  listPlatformWalledGardenHosts,
+  listWalledGardenHostsFor,
 } from "@mashupkgrid/network";
 import {
   buildMikrotikProvisioningScript,
@@ -75,6 +75,7 @@ const createRouterSchema = z.object({
   branchId: z.string().uuid().nullable().optional(),
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
+  routerOsMajor: z.union([z.literal(6), z.literal(7)]).nullable().optional(),
 });
 
 const updateRouterSchema = createRouterSchema.partial();
@@ -104,6 +105,8 @@ const pppoeFieldsSchema = {
   blockTethering: z.boolean().optional(),
   hotspotPorts: z.array(z.string().regex(/^[a-zA-Z0-9_.-]+$/)).optional(),
   lanPort: z.string().regex(/^[a-zA-Z0-9_.-]*$/).optional().nullable(),
+  /** RouterOS 6 or 7 as the ISP knows it; null or absent lets the script detect it. */
+  routerOsMajor: z.union([z.literal(6), z.literal(7)]).nullable().optional(),
 };
 
 const createPendingRouterSchema = z.object({
@@ -310,6 +313,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         blockTethering: body.blockTethering,
         hotspotPorts: body.hotspotPorts,
         lanPort: body.lanPort,
+        routerOsMajor: body.routerOsMajor,
       });
 
       await writeAuditLog({
@@ -388,13 +392,14 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         loginTemplateUrl,
         portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech",
         portalDomains: await getTenantPortalDomains(tenantId),
-        extraWalledGardenHosts: await listPlatformWalledGardenHosts(),
+        extraWalledGardenHosts: await listWalledGardenHostsFor(tenantId),
         pppoeInterface: router.pppoeInterface,
         pppoeGatewayIp: router.pppoeGatewayIp,
         pppoePoolRange: router.pppoePoolRange,
         blockTethering: router.blockTethering,
         hotspotPorts: router.hotspotPorts,
         lanPort: router.lanPort,
+        routerOsMajor: router.routerOsMajor,
       });
 
       await writeAuditLog({
@@ -940,11 +945,14 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       loginTemplateUrl,
       portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech",
       portalDomains: await getTenantPortalDomains(router.tenantId),
-      extraWalledGardenHosts: await listPlatformWalledGardenHosts(),
+      extraWalledGardenHosts: await listWalledGardenHostsFor(router.tenantId),
       pppoeInterface: router.pppoeInterface,
       pppoeGatewayIp: router.pppoeGatewayIp,
       pppoePoolRange: router.pppoePoolRange,
       blockTethering: router.blockTethering,
+      hotspotPorts: router.hotspotPorts,
+      lanPort: router.lanPort,
+      routerOsMajor: router.routerOsMajor,
     });
 
     reply.header("Content-Type", "text/plain; charset=utf-8").send(script);

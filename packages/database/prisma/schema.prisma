@@ -1960,6 +1960,9 @@ model Router {
   boardName            String?
   firmwareVersion      String?
   versionCheckedAt     DateTime?
+  /// The RouterOS major version (6 or 7) the ISP said this router runs when adding it; null = let
+  /// the setup script detect it. Shapes the script (v6 gets no WireGuard, its own NTP syntax).
+  routerOsMajor        Int?
   rolloutTargets       RouterRolloutTarget[]
   tenantId             String
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)

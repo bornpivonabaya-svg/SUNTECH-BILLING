@@ -130,6 +130,7 @@ function tenantSections(has: Has): NavSection[] {
         ...(has("routers.read") ? [{ href: "/routers", label: "Routers", icon: "router", keywords: "mikrotik nas" } as NavItem] : []),
         ...(has("routers.manage") ? [{ href: "/routers/updates", label: "Router updates", icon: "cloud-download", keywords: "ota firmware routeros upgrade push script features fleet reboot" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/routers/health", label: "Router health", icon: "heart-pulse", keywords: "cpu memory temperature uptime reboot graphs" } as NavItem] : []),
+        ...(has("routers.read") ? [{ href: "/routers/walled-garden", label: "Walled garden", icon: "shield", keywords: "hotspot allowed sites before login paywall website" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/routers/backups", label: "Router backups", icon: "hard-drive", keywords: "backup restore export config rollback" } as NavItem] : []),
         ...(has("vlans.read") ? [{ href: "/vlans", label: "VLANs", icon: "layers", keywords: "segments tagging" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/ip-pools", label: "IP pools", icon: "network", keywords: "addresses dhcp" } as NavItem] : []),

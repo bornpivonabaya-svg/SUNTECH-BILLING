@@ -39,6 +39,14 @@ interface RouterRow {
   uptimeSeconds: number | null;
   updatedAt: string;
   vpnIp: string | null;
+  routerOsVersion: string | null;
+  routerOsMajor: 6 | 7 | null;
+}
+
+/** The chosen RouterOS major version disagrees with the one the router last reported. */
+function versionMismatch(r: RouterRow): boolean {
+  const seen = r.routerOsVersion?.match(/^(\d+)\./)?.[1];
+  return r.routerOsMajor != null && seen !== undefined && Number(seen) !== r.routerOsMajor;
 }
 
 interface DeviceSession {
@@ -387,6 +395,21 @@ export default function RoutersPage() {
                           ))}
                         </select>
                       )}
+                      <select
+                        aria-label={tr("RouterOS version")}
+                        title={tr("RouterOS version the setup script is made for")}
+                        value={router.routerOsMajor ?? ""}
+                        onChange={(e) =>
+                          apiFetch(`/api/v1/routers/${router.id}`, { method: "PATCH", body: JSON.stringify({ routerOsMajor: e.target.value ? Number(e.target.value) : null }) })
+                            .then(() => queryClient.invalidateQueries({ queryKey: ["routers"] }))
+                            .catch((err) => setError(err instanceof ApiRequestError ? err.message : String(err)))
+                        }
+                        className="rounded-md border border-obsidian-700 bg-obsidian-950 px-1.5 py-0.5 text-xs text-slate-300"
+                      >
+                        <option value="">{tr("RouterOS: detect")}</option>
+                        <option value="6">RouterOS v6</option>
+                        <option value="7">RouterOS v7</option>
+                      </select>
                     </div>
                     <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-slate-400">
                       {router.host ? (
@@ -477,6 +500,16 @@ export default function RoutersPage() {
                   </button>
                 </div>
               </div>
+
+              {versionMismatch(router) && (
+                <div className="px-5 pb-4">
+                  <Notice tone="warn">
+                    {tr("This router was added as RouterOS v{chosen} but reports {seen}. Pick the right version above, then run its setup script again so WireGuard, NTP and Wi-Fi match.")
+                      .replace("{chosen}", String(router.routerOsMajor))
+                      .replace("{seen}", router.routerOsVersion ?? "")}
+                  </Notice>
+                </div>
+              )}
 
               {router.lastError && (
                 <div className="px-5 pb-4">
