@@ -1014,7 +1014,11 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       return;
     }
     const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${token}/callback`;
-    reply.header("Content-Type", "text/plain; charset=utf-8").send(buildHeartbeatScript(callbackUrl));
+    const tenantSlug = router.tenant?.slug;
+    const loginTemplateUrl = tenantSlug
+      ? `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
+      : undefined;
+    reply.header("Content-Type", "text/plain; charset=utf-8").send(buildHeartbeatScript(callbackUrl, loginTemplateUrl));
   });
 
   app.post("/provision/:token/callback", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {

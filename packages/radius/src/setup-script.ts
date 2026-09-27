@@ -433,6 +433,7 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 # login-by=mac first: a phone that has paid is logged straight back in by the RADIUS server
 # (findMacLogin) when it reconnects, without seeing the sign-in page at all.
 :do {/ip hotspot profile set [find default=yes] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
+:do {/ip hotspot reset-html} on-error={}
 :do {/ip hotspot user profile set [find default=yes] shared-users=1} on-error={}
 :do {/ip hotspot remove [find name=mkg-hotspot]} on-error={}
 :do {/ip hotspot add name=mkg-hotspot interface=bridge address-pool=default-dhcp profile=default disabled=no} on-error={}
@@ -440,12 +441,14 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}
+:do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
+:do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}
 
 # Self-repair for the branded login page: if hotspot/login.html is ever missing (a setup cut short,
 # a reset of the hotspot folder), customers get MikroTik's stock sign-in page instead of the portal.
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
-:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}; :if ([:len [/file find name=\\"hotspot/alogin.html\\"]] = 0) do={:do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
+:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0 && [:len [/file find name=\\"flash/hotspot/login.html\\"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
 # Persistent check-in, once a minute. It fetches the platform's small report script into memory
 # (never onto flash) and runs it: CPU, memory, disk, temperature, uptime, users — see
@@ -505,14 +508,19 @@ function heartbeatOnEvent(callbackUrl: string): string {
  * as may the hotspot user count on a router with no hotspot. Kept well under the 4 KB a v6
  * `fetch output=user` returns.
  */
-export function buildHeartbeatScript(callbackUrl: string): string {
+export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string): string {
   const get = (field: string) => `[/system resource get ${field}]`;
+  const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
+  const portalSelfRepair = loginTemplateUrl
+    ? `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; ${aloginTemplateUrl ? `:do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}; ` : ""}};`
+    : `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}};`;
   return [
     `{`,
     `:do {/interface bridge port add bridge=bridge interface=wlan1} on-error={};`,
     `:do {/interface bridge port add bridge=bridge interface=wifi1} on-error={};`,
     `:do {/interface wireless set [find name=wlan1] disabled=no mode=ap-bridge} on-error={};`,
     `:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap} on-error={};`,
+    portalSelfRepair,
     `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")});`,
     `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={};`,
     `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={};`,
