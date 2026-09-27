@@ -6,7 +6,11 @@ import { apiFetch } from "@/lib/api-client";
 import { tr } from "@/lib/tr";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { ChartTable } from "@/components/charts/chart-table";
-import { EmptyState, PageHeader, Panel, Pill, Segmented, TableShell, td, th } from "@/components/dashboard/surface";
+import { EmptyState, PageHeader, Panel, Pill, Segmented, TableShell, td as baseTd, th as baseTh } from "@/components/dashboard/surface";
+
+// Ten columns: tighter cell padding than the shared table so the fleet fits a laptop screen.
+const th = baseTh.replace("px-5", "px-3");
+const td = baseTd.replace("px-5", "px-3");
 
 /**
  * How each router has been doing: the latest CPU, memory and temperature, uptime over the last
@@ -20,6 +24,22 @@ interface FleetHealth {
   status: string;
   siteName: string | null;
   latest: { at: string; cpuPercent: number | null; memoryPercent: number | null; temperatureC: number | null; uptimeSeconds: number | null } | null;
+  /** The router's own last report (every minute); fresher than the 5-minute history. */
+  live: {
+    at: string | null;
+    cpuPercent: number | null;
+    memoryUsedBytes: number | null;
+    memoryTotalBytes: number | null;
+    memoryPercent: number | null;
+    temperatureC: number | null;
+    voltageV: number | null;
+    diskFreeBytes: number | null;
+    diskTotalBytes: number | null;
+    activeUsers: number | null;
+    uptimeSeconds: number | null;
+    routerOsVersion: string | null;
+    boardName: string | null;
+  };
   availability24h: number | null;
   reboots7d: number;
 }
@@ -34,6 +54,11 @@ function uptime(s: number | null | undefined): string {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   return d > 0 ? `${d}d ${h}h` : `${h}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+function mb(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  return bytes >= 1024 ** 3 ? `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB` : `${Math.round((bytes / 1024 ** 2) * 10) / 10} MB`;
 }
 
 function tone(value: number | null | undefined, warn: number, bad: number): "good" | "warn" | "bad" | "neutral" {
@@ -69,42 +94,73 @@ export default function RouterHealthPage() {
     <div className="w-full min-w-0 space-y-6">
       <PageHeader
         title={tr("Router health")}
-        description={tr("CPU, memory, temperature and uptime for every router, recorded every 5 minutes. You get an alert when a router stays busy, runs hot or restarts on its own.")}
+        description={tr("CPU, memory, temperature, voltage, storage, users and uptime for every router. Each router reports every minute, even one the platform can't connect to; history is kept every 5 minutes. You get an alert when a router stays busy, runs hot or restarts on its own.")}
       />
 
       <Panel title={tr("All routers")} padded={false}>
         {!fleet?.length ? (
           <EmptyState title={tr("No routers yet")} />
         ) : (
-          <TableShell minWidth={780}>
+          <TableShell minWidth={960}>
             <thead>
               <tr>
                 <th className={th}>{tr("Router")}</th>
                 <th className={`${th} text-right`}>{tr("CPU")}</th>
                 <th className={`${th} text-right`}>{tr("Memory used")}</th>
                 <th className={`${th} text-right`}>{tr("Temperature")}</th>
+                <th className={`${th} text-right`}>{tr("Voltage")}</th>
+                <th className={`${th} text-right`}>{tr("Storage")}</th>
+                <th className={`${th} text-right`}>{tr("Users")}</th>
                 <th className={`${th} text-right`}>{tr("Up for")}</th>
                 <th className={`${th} text-right`}>{tr("Reachable, 24 h")}</th>
                 <th className={`${th} text-right`}>{tr("Restarts, 7 days")}</th>
               </tr>
             </thead>
             <tbody>
-              {fleet.map((r) => (
-                <tr key={r.id} className={r.id === routerId ? "bg-obsidian-800/40" : undefined}>
-                  <td className={td}>
-                    <button type="button" className="font-medium text-white hover:underline" onClick={() => setRouterId(r.id)} aria-pressed={r.id === routerId}>
-                      {r.name}
-                    </button>
-                    {r.siteName && <span className="block text-xs text-slate-500">{r.siteName}</span>}
-                  </td>
-                  <td className={`${td} text-right`}>{r.latest?.cpuPercent != null ? <Pill tone={tone(r.latest.cpuPercent, 70, 90)}>{r.latest.cpuPercent}%</Pill> : "—"}</td>
-                  <td className={`${td} text-right`}>{r.latest?.memoryPercent != null ? <Pill tone={tone(r.latest.memoryPercent, 80, 92)}>{r.latest.memoryPercent}%</Pill> : "—"}</td>
-                  <td className={`${td} text-right`}>{r.latest?.temperatureC != null ? <Pill tone={tone(r.latest.temperatureC, 65, 75)}>{r.latest.temperatureC} °C</Pill> : "—"}</td>
-                  <td className={`${td} text-right tabular-nums`}>{uptime(r.latest?.uptimeSeconds)}</td>
-                  <td className={`${td} text-right tabular-nums`}>{r.availability24h != null ? `${r.availability24h}%` : "—"}</td>
-                  <td className={`${td} text-right tabular-nums`}>{r.reboots7d > 0 ? <Pill tone="warn">{r.reboots7d}</Pill> : "0"}</td>
-                </tr>
-              ))}
+              {fleet.map((r) => {
+                // The router's last report when there is one, else the last recorded sample.
+                const cpu = r.live.cpuPercent ?? r.latest?.cpuPercent ?? null;
+                const memory = r.live.memoryPercent ?? r.latest?.memoryPercent ?? null;
+                const temperature = r.live.temperatureC ?? r.latest?.temperatureC ?? null;
+                const up = r.live.uptimeSeconds ?? r.latest?.uptimeSeconds ?? null;
+                const model = [r.live.boardName, r.live.routerOsVersion && `RouterOS ${r.live.routerOsVersion}`].filter(Boolean).join(" · ");
+                return (
+                  <tr key={r.id} className={r.id === routerId ? "bg-obsidian-800/40" : undefined}>
+                    <td className={td}>
+                      <button type="button" className="font-medium text-white hover:underline" onClick={() => setRouterId(r.id)} aria-pressed={r.id === routerId}>
+                        {r.name}
+                      </button>
+                      {model && <span className="block text-xs text-slate-500">{model}</span>}
+                      {r.siteName && <span className="block text-xs text-slate-500">{r.siteName}</span>}
+                    </td>
+                    <td className={`${td} text-right`}>{cpu != null ? <Pill tone={tone(cpu, 70, 90)}>{cpu}%</Pill> : "—"}</td>
+                    <td className={`${td} text-right`}>
+                      {memory != null ? <Pill tone={tone(memory, 80, 92)}>{memory}%</Pill> : "—"}
+                      {r.live.memoryTotalBytes != null && (
+                        <span className="block text-xs text-slate-500 tabular-nums">
+                          {mb(r.live.memoryUsedBytes)} / {mb(r.live.memoryTotalBytes)}
+                        </span>
+                      )}
+                    </td>
+                    <td className={`${td} text-right`}>{temperature != null ? <Pill tone={tone(temperature, 65, 75)}>{temperature} °C</Pill> : <span title={tr("This router has no temperature sensor.")}>—</span>}</td>
+                    <td className={`${td} text-right tabular-nums`}>{r.live.voltageV != null ? `${r.live.voltageV} V` : "—"}</td>
+                    <td className={`${td} text-right tabular-nums`}>
+                      {r.live.diskFreeBytes != null ? (
+                        <>
+                          {mb(r.live.diskFreeBytes)}
+                          <span className="block text-xs text-slate-500">{tr("of")} {mb(r.live.diskTotalBytes)}</span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className={`${td} text-right tabular-nums`}>{r.live.activeUsers ?? "—"}</td>
+                    <td className={`${td} text-right tabular-nums`}>{uptime(up)}</td>
+                    <td className={`${td} text-right tabular-nums`}>{r.availability24h != null ? `${r.availability24h}%` : "—"}</td>
+                    <td className={`${td} text-right tabular-nums`}>{r.reboots7d > 0 ? <Pill tone="warn">{r.reboots7d}</Pill> : "0"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </TableShell>
         )}

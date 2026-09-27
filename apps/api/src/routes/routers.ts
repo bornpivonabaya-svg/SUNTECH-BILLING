@@ -8,6 +8,8 @@ import {
   createPendingRouter,
   getGeneratedCredentials,
   completeRouterProvisioning,
+  isHeartbeatReport,
+  parseHeartbeatReport,
   ensureRouterVpnIp,
   startVpnRegistration,
   completeVpnRegistration,
@@ -36,6 +38,7 @@ import {
 } from "@mashupkgrid/network";
 import {
   buildMikrotikProvisioningScript,
+  buildHeartbeatScript,
   buildMikrotikVpnStartScript,
   buildMikrotikVpnCompleteScript,
   buildMikrotikWinboxScript,
@@ -208,22 +211,9 @@ function toRouterSummary(router: RouterRow) {
     status: effectiveStatus,
     memoryUsedBytes: summary.memoryUsedBytes === null ? null : Number(summary.memoryUsedBytes),
     memoryTotalBytes: summary.memoryTotalBytes === null ? null : Number(summary.memoryTotalBytes),
+    diskFreeBytes: summary.diskFreeBytes === null ? null : Number(summary.diskFreeBytes),
+    diskTotalBytes: summary.diskTotalBytes === null ? null : Number(summary.diskTotalBytes),
   };
-}
-
-function parseRouterUptime(uptimeStr: string): number {
-  const trimmed = uptimeStr.trim();
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
-  let totalSeconds = 0;
-  const weeks = trimmed.match(/(\d+)w/);
-  if (weeks && weeks[1]) totalSeconds += parseInt(weeks[1], 10) * 7 * 86400;
-  const days = trimmed.match(/(\d+)d/);
-  if (days && days[1]) totalSeconds += parseInt(days[1], 10) * 86400;
-  const timeMatch = trimmed.match(/(?:^|[a-z])(\d{1,2}):(\d{2}):(\d{2})$/);
-  if (timeMatch && timeMatch[1] && timeMatch[2] && timeMatch[3]) {
-    totalSeconds += parseInt(timeMatch[1], 10) * 3600 + parseInt(timeMatch[2], 10) * 60 + parseInt(timeMatch[3], 10);
-  }
-  return totalSeconds > 0 ? totalSeconds : 60;
 }
 
 const MAX_REPORTED_ACCESS_POINTS = 200;
@@ -983,42 +973,38 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     });
   });
 
+  /** The script the router's mkg-heartbeat scheduler fetches into memory and runs once a minute:
+   *  it reads the router's CPU, memory, disk, temperature, uptime and users and posts them to the
+   *  callback below. Served fresh, so an improvement reaches every router without a re-run of
+   *  setup. The token is the auth, as for setup.rsc. */
+  app.get("/provision/:token/heartbeat.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
+    const { token } = provisionCallbackParamsSchema.parse(request.params);
+    const router = await prisma.router.findFirst({
+      where: { provisionTokenHash: hashToken(token), deletedAt: null },
+      select: { id: true },
+    });
+    if (!router) {
+      reply.status(404).header("Content-Type", "text/plain").send("# Unknown provisioning token\n");
+      return;
+    }
+    const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${token}/callback`;
+    reply.header("Content-Type", "text/plain; charset=utf-8").send(buildHeartbeatScript(callbackUrl));
+  });
+
   app.post("/provision/:token/callback", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const { token } = provisionCallbackParamsSchema.parse(request.params);
     const remoteIp = getClientIp(request);
     const query = (request.query as Record<string, unknown>) || {};
-    let wgpubkey = typeof request.body === "string" ? request.body : "";
+    const rawBody = typeof request.body === "string" ? request.body : "";
+    // The body is either the router's once-a-minute report (see buildHeartbeatScript) or, from
+    // the setup script's VPN step, its WireGuard public key. Older routers put figures in the query.
+    const isReport = isHeartbeatReport(rawBody);
+    let wgpubkey = isReport ? "" : rawBody;
     if (!wgpubkey && typeof query === "object" && "wgpubkey" in query) {
       wgpubkey = String(query.wgpubkey || "");
     }
     wgpubkey = wgpubkey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+");
-
-    const cpuStr = String(query.cpu || "");
-    const uptimeStr = String(query.uptime || "");
-    const freeMemStr = String(query.freemem || "");
-    const totMemStr = String(query.totmem || "");
-
-    const metrics: {
-      cpuLoadPercent?: number;
-      uptimeSeconds?: number;
-      memoryUsedBytes?: bigint;
-      memoryTotalBytes?: bigint;
-    } = {};
-
-    if (cpuStr && !isNaN(Number(cpuStr))) {
-      metrics.cpuLoadPercent = Math.min(100, Math.max(0, Number(cpuStr)));
-    }
-    if (uptimeStr) {
-      metrics.uptimeSeconds = parseRouterUptime(uptimeStr);
-    }
-    if (totMemStr && !isNaN(Number(totMemStr))) {
-      const tot = BigInt(totMemStr);
-      metrics.memoryTotalBytes = tot;
-      if (freeMemStr && !isNaN(Number(freeMemStr))) {
-        const free = BigInt(freeMemStr);
-        metrics.memoryUsedBytes = tot > free ? tot - free : 0n;
-      }
-    }
+    const metrics = parseHeartbeatReport(isReport ? rawBody : "", query);
 
     try {
       const router = await completeRouterProvisioning(token, remoteIp, wgpubkey || undefined, metrics);

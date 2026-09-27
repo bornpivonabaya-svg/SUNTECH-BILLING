@@ -35,8 +35,15 @@ interface RouterRow {
   lastSeenAt: string | null;
   lastError: string | null;
   cpuLoadPercent: number | null;
+  memoryUsedBytes: number | null;
   memoryTotalBytes: number | null;
   uptimeSeconds: number | null;
+  temperatureC: number | null;
+  voltageV: number | null;
+  diskFreeBytes: number | null;
+  diskTotalBytes: number | null;
+  activeUsers: number | null;
+  boardName: string | null;
   updatedAt: string;
   vpnIp: string | null;
   routerOsVersion: string | null;
@@ -117,6 +124,49 @@ function formatUptime(seconds: number | null): string | null {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   return days > 0 ? `up ${days}d ${hours}h` : `up ${hours}h`;
+}
+
+function mb(bytes: number): string {
+  return bytes >= 1024 ** 3 ? `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+/** The router's own figures, as it last reported them: one chip each, coloured when worrying. */
+function HealthStrip({ router }: { router: RouterRow }) {
+  const memPct = router.memoryUsedBytes != null && router.memoryTotalBytes ? Math.round((router.memoryUsedBytes * 100) / router.memoryTotalBytes) : null;
+  const diskPct = router.diskFreeBytes != null && router.diskTotalBytes ? Math.round((router.diskFreeBytes * 100) / router.diskTotalBytes) : null;
+  const chips: { label: string; value: string; bad?: boolean; warn?: boolean }[] = [];
+  if (router.cpuLoadPercent != null) chips.push({ label: "CPU", value: `${router.cpuLoadPercent}%`, bad: router.cpuLoadPercent >= 90, warn: router.cpuLoadPercent >= 70 });
+  if (router.memoryTotalBytes != null)
+    chips.push({
+      label: tr("Memory"),
+      value: memPct != null ? `${memPct}% · ${mb(router.memoryUsedBytes!)} / ${mb(router.memoryTotalBytes)}` : mb(router.memoryTotalBytes),
+      bad: (memPct ?? 0) >= 92,
+      warn: (memPct ?? 0) >= 80,
+    });
+  if (router.temperatureC != null) chips.push({ label: tr("Temperature"), value: `${router.temperatureC} °C`, bad: router.temperatureC >= 75, warn: router.temperatureC >= 65 });
+  if (router.voltageV != null) chips.push({ label: tr("Voltage"), value: `${router.voltageV} V` });
+  if (router.diskFreeBytes != null && router.diskTotalBytes) chips.push({ label: tr("Storage free"), value: `${mb(router.diskFreeBytes)} / ${mb(router.diskTotalBytes)}`, warn: (diskPct ?? 100) < 10 });
+  if (router.activeUsers != null) chips.push({ label: tr("Users online"), value: String(router.activeUsers) });
+  if (router.uptimeSeconds != null) chips.push({ label: tr("Up for"), value: formatUptime(router.uptimeSeconds)!.replace(/^up /, "") });
+  if (chips.length === 0) return null;
+  return (
+    <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={tr("Router health")}>
+      {chips.map((c) => (
+        <li
+          key={c.label}
+          className={`rounded-md border px-2 py-0.5 text-xs tabular-nums ${
+            c.bad
+              ? "border-red-500/40 bg-red-500/10 text-red-300"
+              : c.warn
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                : "border-obsidian-700 bg-obsidian-950 text-slate-300"
+          }`}
+        >
+          <span className="text-slate-500">{c.label}</span> {c.value}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function formatLastChecked(iso: string | null): string {
@@ -363,7 +413,6 @@ export default function RoutersPage() {
       <div className="space-y-4">
         {routers?.map((router) => {
           const status = { tone: STATUS[router.status].tone, label: STATUS_LABEL(t)[router.status] };
-          const uptime = formatUptime(router.uptimeSeconds);
           const sessionsOpen = openSessionsFor === router.id;
           const apsOpen = openAccessPointsFor === router.id;
           return (
@@ -453,15 +502,14 @@ export default function RoutersPage() {
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">
                       {[
-                        router.vendor,
-                        router.memoryTotalBytes ? `${Math.round(router.memoryTotalBytes / 1048576)} MB RAM` : null,
-                        router.cpuLoadPercent !== null ? `CPU ${router.cpuLoadPercent}%` : null,
-                        uptime,
+                        router.boardName ?? router.vendor,
+                        router.routerOsVersion ? `RouterOS ${router.routerOsVersion}` : null,
                         formatLastChecked(router.updatedAt),
                       ]
                         .filter(Boolean)
                         .join(" · ")}
                     </p>
+                    <HealthStrip router={router} />
                   </div>
                 </div>
 
@@ -527,7 +575,7 @@ export default function RoutersPage() {
                 </div>
               )}
 
-              {router.lastError && (
+              {router.lastError && router.status !== "ONLINE" && (
                 <div className="px-5 pb-4">
                   <Notice tone="bad">
                     <span className="font-medium">{t.lastError}</span> <span className="break-words font-mono text-xs">{router.lastError}</span>
