@@ -512,6 +512,15 @@ export default function HotspotCaptivePortalPage() {
     },
   });
 
+  // The payment polls below must not restart on every render: the 1-second countdown re-renders the page,
+  // and `connectWithVoucher` (a mutation object) is new each render, so with those in the effect's
+  // dependencies the 2.5 s poll was torn down every second and never fired — payment was only ever
+  // noticed when the customer pressed "I have entered my PIN". Read them through refs instead.
+  const connectRef = useRef(connectWithVoucher);
+  connectRef.current = connectWithVoucher;
+  const buyPhoneRef = useRef(buyPhone);
+  buyPhoneRef.current = buyPhone;
+
   // Load whatever's remembered for this tenant as soon as we're in the browser (SSR has no
   // localStorage), and — the actual force-reconnect — if the router just redirected us here
   // (link-login-only present) with a still-valid remembered code, replay it immediately with no
@@ -682,7 +691,7 @@ export default function HotspotCaptivePortalPage() {
           { skipAuth: true }
         );
         if (res.status === "COMPLETED" && res.voucherCode && !stopped) {
-          connectWithVoucher.mutate(res.voucherCode);
+          connectRef.current.mutate(res.voucherCode);
           setActivePaystackRef(null);
         }
       } catch {
@@ -693,7 +702,7 @@ export default function HotspotCaptivePortalPage() {
     return () => {
       stopped = true;
     };
-  }, [activePaystackRef, tenantSlug, connectWithVoucher]);
+  }, [activePaystackRef, tenantSlug]);
 
   // M-Pesa STK Polling loop
   useEffect(() => {
@@ -709,7 +718,7 @@ export default function HotspotCaptivePortalPage() {
         if (res.status === "COMPLETED" && res.voucherCode) {
           setPollingStatus("COMPLETED");
           clearInterval(interval);
-          connectWithVoucher.mutate(res.voucherCode);
+          connectRef.current.mutate(res.voucherCode);
         } else if (res.status === "FAILED" || res.status === "CANCELLED") {
           setPollingStatus(res.status);
           setError(res.resultDesc || (res.status === "CANCELLED" ? "Payment was cancelled on phone." : "Payment failed."));
@@ -738,11 +747,11 @@ export default function HotspotCaptivePortalPage() {
             try {
               const recovered = await apiFetch<{ code: string }>(
                 `/api/v1/hotspot/${tenantSlug}/recover`,
-                { method: "POST", skipAuth: true, body: JSON.stringify({ phone: buyPhone.trim() }) }
+                { method: "POST", skipAuth: true, body: JSON.stringify({ phone: buyPhoneRef.current.trim() }) }
               );
               setPollingStatus("COMPLETED");
               setVoucherCode(recovered.code);
-              connectWithVoucher.mutate(recovered.code);
+              connectRef.current.mutate(recovered.code);
             } catch {
               // Genuinely still pending, or genuinely failed — either way we have exhausted what
               // this page can check on its own. Point at the always-available recovery button
@@ -765,7 +774,7 @@ export default function HotspotCaptivePortalPage() {
       clearInterval(interval);
       clearInterval(countdown);
     };
-  }, [checkoutRequestId, pollingStatus, tenantSlug, connectWithVoucher, buyPhone]);
+  }, [checkoutRequestId, pollingStatus, tenantSlug]);
 
   const effectiveThemeId = (userSelectedTheme || localConfig?.activeThemeId || tenant?.activeThemeId || activeThemeId) as ThemeId;
   const SelectedThemeComponent = getThemeComponent(effectiveThemeId);
