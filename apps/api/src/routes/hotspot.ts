@@ -796,7 +796,10 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
         `${portalBase}/hotspot/${tenantSlug}` +
         `?mac=$(mac)&ip=$(ip)&link-login-only=$(link-login-only-esc)&link-orig=$(link-orig-esc)&error=$(error-esc)`;
 
+      // "mkg-portal" marks this as the platform's page: the router's self-repair (portalRepair)
+      // replaces any login.html without it, such as MikroTik's stock page after a reset-html.
       const html = `<!DOCTYPE html>
+<!-- mkg-portal -->
 <html>
 <head>
   <meta charset="utf-8">

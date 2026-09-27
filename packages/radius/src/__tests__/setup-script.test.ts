@@ -293,6 +293,8 @@ describe("router health report", () => {
     expect(report).toContain(":local dir [/ip hotspot profile get $p html-directory]");
     expect(report).toContain(':local f [/file find name=($dir . "/login.html")]');
     expect(report).toContain("[/file get ($f->0) size] >= 200");
+    // MikroTik's stock page (after a reset-html) is replaced too: ours carries a marker.
+    expect(report).toContain('[:find [/file get ($f->0) contents] "mkg-portal"]');
     // Rebuilds that exact hotspot's pages through :parse, then downloads into the same folder.
     expect(report).toContain(':local r [:parse ("/ip hotspot reset-html " . $h)]');
     expect(report).toContain(`/tool fetch url="${login}" dst-path=($dir . "/login.html")`);
