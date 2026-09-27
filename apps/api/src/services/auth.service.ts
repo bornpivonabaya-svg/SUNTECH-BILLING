@@ -435,6 +435,7 @@ export async function registerIspTenant(
   const user = await prisma.user.create({
     data: {
       tenantId: tenant.id,
+      name: body.name?.trim() || null,
       email: cleanEmail,
       phone: body.phone?.trim() || null,
       passwordHash,

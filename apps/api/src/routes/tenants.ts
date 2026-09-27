@@ -101,13 +101,13 @@ async function notifyTenantOwner(
   const owner = await prisma.user.findFirst({
     where: { tenantId: tenant.id, deletedAt: null },
     orderBy: { createdAt: "asc" },
-    select: { email: true, phone: true },
+    select: { name: true, email: true, phone: true },
   });
   if (!owner) return { email: false, whatsapp: false };
 
   const dashboardUrl = `https://${tenant.slug}.${env.PLATFORM_BASE_DOMAIN}/login`;
   const portalUrl = `${env.APP_WEB_URL}/hotspot/${tenant.slug}`;
-  const ownerName = owner.email.split("@")[0] ?? "there";
+  const ownerName = owner.name?.split(" ")[0] || owner.email.split("@")[0] || "there";
   const notified = { email: false, whatsapp: false };
 
   try {
@@ -204,6 +204,28 @@ async function loadTenantUsage(tenantIds: string[]): Promise<Map<string, TenantU
   return usage;
 }
 
+interface TenantOwner {
+  name: string | null;
+  email: string;
+  phone: string | null;
+  emailVerified: boolean;
+  lastLoginAt: Date | null;
+}
+
+/** Each tenant's owner: its earliest user, the account sign-up created (same rule as
+ *  notifyTenantOwner). One query for the whole page. */
+async function loadTenantOwners(tenantIds: string[]): Promise<Map<string, TenantOwner>> {
+  const users = await prisma.user.findMany({
+    where: { tenantId: { in: tenantIds }, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+    distinct: ["tenantId"],
+    select: { tenantId: true, name: true, email: true, phone: true, emailVerifiedAt: true, lastLoginAt: true },
+  });
+  return new Map(
+    users.map((u) => [u.tenantId!, { name: u.name, email: u.email, phone: u.phone || null, emailVerified: Boolean(u.emailVerifiedAt), lastLoginAt: u.lastLoginAt }])
+  );
+}
+
 interface TenantUsage {
   routerCount: number;
   routersOnline: number;
@@ -216,10 +238,19 @@ interface TenantUsage {
     { config: { audience: "platform" }, preHandler: [...preHandler, requirePermission("tenants.read")] },
     async (request, reply) => {
       const query = listQuerySchema.parse(request.query);
+      const keyword = buildKeywordSearchWhere(query.search, SEARCHABLE_FIELDS) as { OR: object[] } | undefined;
       const where = {
         deletedAt: null,
         ...(query.status ? { status: query.status } : {}),
-        ...buildKeywordSearchWhere(query.search, SEARCHABLE_FIELDS),
+        // Also finds a tenant by its owner's name, email or phone — what support usually has.
+        ...(keyword && query.search
+          ? {
+              OR: [
+                ...keyword.OR,
+                { users: { some: { deletedAt: null, OR: (["name", "email", "phone"] as const).map((f) => ({ [f]: { contains: query.search, mode: "insensitive" as const } })) } } },
+              ],
+            }
+          : {}),
       };
       const [items, total] = await Promise.all([
         prisma.tenant.findMany({
@@ -231,7 +262,8 @@ interface TenantUsage {
         prisma.tenant.count({ where }),
       ]);
 
-      const usage = await loadTenantUsage(items.map((tenant) => tenant.id));
+      const ids = items.map((tenant) => tenant.id);
+      const [usage, owners] = await Promise.all([loadTenantUsage(ids), loadTenantOwners(ids)]);
       // platformBaseDomain rides along here (not a separate request) so the "Provision New
       // Tenant" form's live URL preview can show the real configured domain instead of a
       // hardcoded guess — this list is already fetched on page load regardless.
@@ -239,7 +271,7 @@ interface TenantUsage {
         successResponse(
           {
             ...paginate(
-              items.map((tenant) => ({ ...withPlatformUrl(tenant), usage: usage.get(tenant.id)! })),
+              items.map((tenant) => ({ ...withPlatformUrl(tenant), usage: usage.get(tenant.id)!, owner: owners.get(tenant.id) ?? null })),
               total,
               query
             ),
@@ -316,6 +348,7 @@ interface TenantUsage {
         createdUser = await prisma.user.create({
           data: {
             tenantId: tenant.id,
+            name: ownerName?.trim() || null,
             email: cleanEmail,
             phone: normalizedPhone || "",
             passwordHash,
@@ -558,6 +591,80 @@ interface TenantUsage {
    * the moment they are told they are live, on both channels they gave us, with the links that
    * now work. Idempotent on an already-active tenant so a double click sends one welcome.
    */
+  /**
+   * The tenant's free trial: extend it by some days, set its end date, or end it now. Keeps the
+   * trial subscription in step (the hourly expire-trials job reads its currentPeriodEnd, and would
+   * otherwise mark an extended trial expired), clears the "trial ended" banners a new date makes
+   * wrong, and tells the ISP with a dashboard banner. A paid-up (ACTIVE) or overdue plan is left
+   * alone: those are about payment, not the trial.
+   */
+  app.post(
+    "/:tenantId/trial",
+    { config: { audience: "platform" }, preHandler: [...preHandler, requirePermission("tenants.update")] },
+    async (request, reply) => {
+      const { tenantId } = idParamsSchema.parse(request.params);
+      const body = z
+        .discriminatedUnion("action", [
+          z.object({ action: z.literal("extend"), days: z.number().int().min(1).max(365) }),
+          z.object({ action: z.literal("set"), until: z.string().datetime() }),
+          z.object({ action: z.literal("end") }),
+        ])
+        .parse(request.body);
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, include: { subscription: true } });
+      if (!tenant || tenant.deletedAt) throw new NotFoundError("Tenant");
+
+      const now = new Date();
+      let until: Date;
+      if (body.action === "extend") {
+        const from = tenant.trialEndsAt && tenant.trialEndsAt > now ? tenant.trialEndsAt : now;
+        until = new Date(from.getTime() + body.days * 24 * 60 * 60 * 1000);
+      } else if (body.action === "set") {
+        until = new Date(body.until);
+        if (until <= now) throw new ConflictError("Pick a date in the future, or use “End trial now”.");
+      } else {
+        until = now;
+      }
+
+      const sub = tenant.subscription;
+      const syncSub = sub && (sub.status === "TRIALING" || sub.status === "EXPIRED" || sub.status === "CANCELLED");
+      await prisma.$transaction([
+        prisma.tenant.update({ where: { id: tenantId }, data: { trialEndsAt: until } }),
+        ...(syncSub
+          ? [prisma.tenantSubscription.update({ where: { id: sub.id }, data: body.action === "end" ? { status: "EXPIRED", currentPeriodEnd: until } : { status: "TRIALING", currentPeriodEnd: until } })]
+          : []),
+        ...(body.action === "end"
+          ? []
+          : [
+              prisma.platformAnnouncement.deleteMany({ where: { tenantId, title: { in: ["Your free trial has ended", "Your free trial has been extended"] } } }),
+              prisma.platformAnnouncement.create({
+                data: {
+                  tenantId,
+                  title: "Your free trial has been extended",
+                  body: `Your free trial now runs until ${until.toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric", timeZone: tenant.timezone || "Africa/Nairobi" })}. Everything is unlocked until then.`,
+                  severity: "INFO",
+                  createdByUserId: request.user!.id,
+                  expiresAt: until,
+                },
+              }),
+            ]),
+      ]);
+
+      await writeAuditLog({
+        tenantId,
+        actorUserId: request.user!.id,
+        action: body.action === "end" ? "tenant.trial_ended" : "tenant.trial_extended",
+        resourceType: "Tenant",
+        resourceId: tenantId,
+        before: { trialEndsAt: tenant.trialEndsAt, subscriptionStatus: sub?.status ?? null },
+        after: { trialEndsAt: until, subscriptionStatus: syncSub ? (body.action === "end" ? "EXPIRED" : "TRIALING") : sub?.status ?? null },
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+
+      reply.send(successResponse({ trialEndsAt: until.toISOString(), subscriptionSynced: Boolean(syncSub) }, request.id));
+    }
+  );
+
   app.post(
     "/:tenantId/approve",
     { config: { audience: "platform" }, preHandler: [...preHandler, requirePermission("tenants.update")] },
