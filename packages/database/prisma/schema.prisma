@@ -1827,6 +1827,8 @@ model MpesaStkRequest {
   hotspotPackageId   String?
   hotspotPackage     HotspotPackage?        @relation(fields: [hotspotPackageId], references: [id])
   hotspotVoucherCode String?
+  /// Where to email the voucher once a hotspot purchase completes, if the buyer gave one.
+  hotspotEmail       String?
   initiatedByUserId  String?
   phone              String
   amountMinor        Int

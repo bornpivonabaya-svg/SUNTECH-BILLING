@@ -33,6 +33,8 @@ import {
   hotspotPortalRateLimitConfig,
 } from "../plugins/rate-limit.js";
 import { resolveTenantBySlug } from "../services/auth.service.js";
+import { emailHotspotVoucherOnce } from "../lib/hotspot-voucher-email.js";
+import { enqueueSendHotspotVoucherEmail } from "../lib/queue.js";
 
 const tenantParamsSchema = z.object({ tenantSlug: z.string().min(1) });
 const loginBodySchema = z.object({
@@ -50,6 +52,10 @@ const recoverBodySchema = z
   .refine((v) => Boolean(v.phone || v.mpesaMessage), {
     message: "Enter the phone number you paid with, or paste the M-Pesa message",
   });
+const voucherEmailBodySchema = z.object({
+  code: z.string().min(1).max(32),
+  email: z.string().trim().toLowerCase().email().max(254),
+});
 const accountLoginBodySchema = z.object({ phone: z.string().min(9), password: z.string().min(1) });
 const supportTicketBodySchema = z.object({
   name: z.string().min(1).max(120),
@@ -493,6 +499,36 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /**
+   * "Email me this code" on the portal: sends a voucher the customer already holds to their inbox,
+   * so it survives the phone closing the sign-in page. Knowing the code is the proof; the same
+   * code and address send at most once an hour.
+   */
+  app.post(
+    "/:tenantSlug/voucher-email",
+    { config: { audience: "customer", rateLimit: hotspotLoginRateLimitConfig }, preHandler: [checkMaintenance] },
+    async (request, reply) => {
+      const { tenantSlug } = tenantParamsSchema.parse(request.params);
+      const body = voucherEmailBodySchema.parse(request.body);
+      const tenant = await resolveTenantBySlug(tenantSlug);
+      const code = body.code.trim().toUpperCase();
+      const voucher = await prisma.hotspotVoucher.findUnique({
+        where: { tenantId_code: { tenantId: tenant.id, code } },
+        select: { code: true, status: true },
+      });
+      if (!voucher) throw new NotFoundError("Voucher");
+      if (voucher.status === "EXPIRED" || voucher.status === "USED") {
+        throw new ConflictError("This voucher has expired, so there is nothing to email");
+      }
+      const hour = Math.floor(Date.now() / 3_600_000);
+      await enqueueSendHotspotVoucherEmail(
+        { tenantId: tenant.id, email: body.email, voucherCode: voucher.code },
+        `manual-${voucher.code}-${body.email}-${hour}`
+      );
+      reply.status(202).send(successResponse({ sent: true, email: body.email }, request.id));
+    }
+  );
+
+  /**
    * Public endpoint listing available packages for online purchase on the captive portal.
    */
   app.get(
@@ -610,6 +646,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
       const stkRequest = await initiateHotspotPurchaseStkPush(tenant.id, {
         hotspotPackageId: body.hotspotPackageId,
         phone: body.phone,
+        email: body.email?.trim() || null,
       });
 
       reply.status(201).send(
@@ -650,6 +687,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
           // ignore query errors during polling
         }
       }
+      if (req.status === "COMPLETED") await emailHotspotVoucherOnce(tenant.id, req.hotspotEmail, req.hotspotVoucherCode);
 
       reply.send(
         successResponse(
@@ -687,6 +725,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
           // ignore verify network blips during polling
         }
       }
+      if (req.status === "COMPLETED") await emailHotspotVoucherOnce(tenant.id, req.hotspotEmail, req.hotspotVoucherCode);
 
       reply.send(
         successResponse(
@@ -724,6 +763,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
           // ignore verify network blips during polling
         }
       }
+      if (req.status === "COMPLETED") await emailHotspotVoucherOnce(tenant.id, req.hotspotEmail, req.hotspotVoucherCode);
 
       reply.send(
         successResponse(

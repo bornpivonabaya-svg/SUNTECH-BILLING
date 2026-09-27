@@ -43,10 +43,13 @@ echo "--- migrations (last lines of the migrate job)"
 run "${COMPOSE[@]}" logs --no-color --tail 8 migrate
 
 section "Settings (secrets show only set / not set)"
-SHOW="NODE_ENV APP_API_PUBLIC_URL APP_PORTAL_URL ROUTER_API_BASE_URL RADIUS_SERVER_HOST ENABLE_EMBEDDED_RADIUS_SERVER RADIUS_AUTH_PORT RADIUS_ACCT_PORT ENABLE_WIREGUARD_REMOTE_ACCESS WIREGUARD_INTERFACE WIREGUARD_SUBNET_CIDR WIREGUARD_SERVER_ENDPOINT WIREGUARD_LISTEN_PORT ENABLE_WINBOX_RELAY WINBOX_RELAY_PORT_RANGE ROUTER_MANAGEMENT_SOURCE TRUST_PROXY SANITY_PROJECT_ID SANITY_DATASET"
-SECRET="MPESA_CALLBACK_TOKEN MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_PASSKEY WIREGUARD_SERVER_PUBLIC_KEY WIREGUARD_SERVER_PRIVATE_KEY ENCRYPTION_KEY JWT_ACCESS_SECRET JWT_REFRESH_PEPPER SANITY_READ_TOKEN SANITY_REVALIDATE_SECRET"
+SHOW="NODE_ENV SMTP_HOST SMTP_FROM RESEND_FROM APP_API_PUBLIC_URL APP_PORTAL_URL ROUTER_API_BASE_URL RADIUS_SERVER_HOST ENABLE_EMBEDDED_RADIUS_SERVER RADIUS_AUTH_PORT RADIUS_ACCT_PORT ENABLE_WIREGUARD_REMOTE_ACCESS WIREGUARD_INTERFACE WIREGUARD_SUBNET_CIDR WIREGUARD_SERVER_ENDPOINT WIREGUARD_LISTEN_PORT ENABLE_WINBOX_RELAY WINBOX_RELAY_PORT_RANGE ROUTER_MANAGEMENT_SOURCE TRUST_PROXY SANITY_PROJECT_ID SANITY_DATASET"
+SECRET="RESEND_API_KEY SMTP_PASSWORD MPESA_CALLBACK_TOKEN MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_PASSKEY WIREGUARD_SERVER_PUBLIC_KEY WIREGUARD_SERVER_PRIVATE_KEY ENCRYPTION_KEY JWT_ACCESS_SECRET JWT_REFRESH_PEPPER SANITY_READ_TOKEN SANITY_REVALIDATE_SECRET"
 for k in $SHOW; do printf '%-34s %s\n' "$k" "$(env_value "$k" || true)"; done
 for k in $SECRET; do printf '%-34s %s\n' "$k" "$([ -n "$(env_value "$k")" ] && echo set || echo 'NOT SET')"; done
+if [ -z "$(env_value RESEND_API_KEY)" ] && [ -z "$(env_value SMTP_PASSWORD)" ]; then
+  echo "email: NOT CONFIGURED — no email goes out (vouchers, receipts, password resets). Set RESEND_API_KEY or SMTP_*."
+fi
 
 section "Firewall and ports"
 run sudo ufw status verbose
@@ -95,7 +98,7 @@ section "M-Pesa: last 15 purchases"
 sql "SELECT to_char(s.\"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi','DD Mon HH24:MI:SS') AS at_eat, t.slug AS isp,
             regexp_replace(s.phone, '^(\\d{5})\\d+(\\d{3})$', '\\1****\\2') AS phone,
             s.\"amountMinor\"/100 AS ksh, s.status, s.\"resultCode\" AS code, left(s.\"resultDesc\", 45) AS result,
-            s.\"hotspotVoucherCode\" IS NOT NULL AS voucher, s.\"collectedBy\" AS via
+            s.\"hotspotVoucherCode\" IS NOT NULL AS voucher, s.\"hotspotEmail\" IS NOT NULL AS emailed, s.\"collectedBy\" AS via
      FROM mpesa_stk_requests s JOIN tenants t ON t.id = s.\"tenantId\"
      ORDER BY s.\"createdAt\" DESC LIMIT 15;"
 echo "--- M-Pesa callbacks received (last 15). None at all = Safaricom can't reach the callback URL."

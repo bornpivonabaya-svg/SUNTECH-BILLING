@@ -6,6 +6,7 @@ import {
   type SendVerificationEmailJob,
   type SendPasswordResetEmailJob,
   type SendPaymentConfirmationEmailJob,
+  type SendHotspotVoucherEmailJob,
   type DeliverWebhookEventJob,
   type SendWhatsappOtpJob,
   type SendWhatsappVoucherJob,
@@ -116,6 +117,21 @@ export async function enqueueSendPaymentConfirmationEmail(data: SendPaymentConfi
     attempts: 5,
     backoff: { type: "exponential", delay: 5000 },
     removeOnComplete: 1000,
+    removeOnFail: 5000,
+  });
+}
+
+/**
+ * Emails a hotspot voucher. Jobs with the same `dedupeKey` send once while the finished job is
+ * kept (a week): the M-Pesa callback and the portal's status poll both see a purchase complete,
+ * and a customer tapping "Email me this code" repeatedly should not flood an inbox.
+ */
+export async function enqueueSendHotspotVoucherEmail(data: SendHotspotVoucherEmailJob, dedupeKey?: string): Promise<void> {
+  await emailQueue.add(JOB_NAMES.sendHotspotVoucherEmail, data, {
+    ...(dedupeKey ? { jobId: `voucher-email-${dedupeKey}`.replace(/[^\w@.-]/g, "_") } : {}),
+    attempts: 5,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { age: 7 * 24 * 3600 },
     removeOnFail: 5000,
   });
 }

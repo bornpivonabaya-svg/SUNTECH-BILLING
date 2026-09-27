@@ -43,6 +43,7 @@ import { settleAfterCollection } from "../lib/settle-after-collection.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { enqueueSendPaymentConfirmationEmail, enqueueSendWhatsappVoucher } from "../lib/queue.js";
 import { emitWebhookEvent } from "../lib/webhooks.js";
+import { emailHotspotVoucherOnce } from "../lib/hotspot-voucher-email.js";
 
 const staffPreHandler = [authenticate, resolveTenant, checkMaintenance] as const;
 
@@ -443,6 +444,7 @@ export async function mpesaRoutes(app: FastifyInstance): Promise<void> {
             durationMinutes: stkRequest.hotspotPackage?.durationMinutes ?? null,
             dataCapMb: stkRequest.hotspotPackage?.dataCapMb ?? null,
           });
+          await emailHotspotVoucherOnce(stkRequest.tenantId, stkRequest.hotspotEmail, stkRequest.hotspotVoucherCode);
         }
         void emitWebhookEvent(stkRequest.tenantId, "payment.received", {
           method: "MPESA_STK",
