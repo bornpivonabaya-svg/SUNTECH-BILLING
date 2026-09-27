@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHeartbeatReport, parseHealthSensors, parseHeartbeatReport, parseUptimeSeconds, parseVpnReport } from "../heartbeat-report.js";
+import { isHeartbeatReport, parseHealthSensors, parseHeartbeatReport, parseUptimeSeconds, parseVpnReport, parseHotspotCheck, hotspotProblems } from "../heartbeat-report.js";
 
 // Built exactly as the router's heartbeat script builds it (buildHeartbeatScript).
 const v7Body =
@@ -68,5 +68,25 @@ describe("the router's VPN report", () => {
 
   it("is read from the same report as the rest", () => {
     expect(parseHeartbeatReport("cpu=3&wg=1,").vpnStatus).toBe("waiting");
+  });
+});
+
+describe("the router's hotspot self-check", () => {
+  it("reads the counts and ignores junk", () => {
+    expect(parseHotspotCheck("srv=1;hosts=3;auth=1;leases=4;dnsnat=2;login=2;radios=1;garden=3;ping=2;dns=1")).toEqual({
+      srv: 1, hosts: 3, auth: 1, leases: 4, dnsnat: 2, login: 2, radios: 1, garden: 3, ping: 2, dns: 1,
+    });
+    expect(parseHotspotCheck("srv=x;evil=5;ping=-1")).toBeUndefined();
+    expect(parseHeartbeatReport("cpu=3&hs=srv=1;ping=0").hotspotCheck).toEqual({ srv: 1, ping: 0 });
+  });
+
+  it("names each cause of 'Connected, no internet' in plain words", () => {
+    expect(hotspotProblems({ srv: 1, hosts: 2, leases: 2, dnsnat: 2, login: 1, radios: 1, garden: 2, ping: 2, dns: 1 })).toEqual([]);
+    const codes = (c: Parameters<typeof hotspotProblems>[0]) => hotspotProblems(c).map((p) => p.code);
+    expect(codes({ ping: 0, dns: 0 })).toEqual(["no-internet", "no-dns"]);
+    expect(codes({ srv: 0, login: 0, radios: 0, garden: 0 })).toEqual(["no-hotspot", "no-login-page", "wifi-not-bridged", "no-walled-garden"]);
+    expect(codes({ dnsnat: 240 })).toEqual(["dns-rules-piled"]);
+    expect(codes({ srv: 1, leases: 3, hosts: 0 })).toEqual(["hosts-bypass"]);
+    expect(hotspotProblems(null)).toEqual([]);
   });
 });

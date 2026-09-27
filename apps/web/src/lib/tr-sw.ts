@@ -1082,4 +1082,6 @@ export const SW: Record<string, string> = {
   "connected": "imeunganishwa",
   "not connecting": "haiunganishi",
   "not set up": "haijasanidiwa",
+  "Hotspot check passed: internet, DNS, sign-in page and Wi-Fi are all in place.": "Ukaguzi wa hotspot umefaulu: intaneti, DNS, ukurasa wa kuingia na Wi-Fi viko sawa.",
+  "Hotspot problems the router found": "Matatizo ya hotspot ambayo ruta imegundua",
 };

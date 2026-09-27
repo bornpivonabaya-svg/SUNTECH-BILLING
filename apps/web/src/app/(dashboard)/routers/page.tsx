@@ -45,6 +45,8 @@ interface RouterRow {
   activeUsers: number | null;
   boardName: string | null;
   vpnStatus: "none" | "no-peer" | "waiting" | "connected" | null;
+  hotspotCheckAt?: string | null;
+  hotspotProblems?: { code: string; message: string }[];
   updatedAt: string;
   vpnIp: string | null;
   routerOsVersion: string | null;
@@ -182,6 +184,26 @@ function HealthStrip({ router }: { router: RouterRow }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** What the router's own once-a-minute hotspot check found: the reasons customers would get
+ *  "Connected, no internet", in plain words, or a short all-clear. */
+function HotspotCheckResult({ router }: { router: RouterRow }) {
+  if (!router.hotspotCheckAt) return null;
+  const problems = router.hotspotProblems ?? [];
+  if (problems.length === 0) {
+    return <p className="mt-2 text-xs text-emerald-400">{tr("Hotspot check passed: internet, DNS, sign-in page and Wi-Fi are all in place.")}</p>;
+  }
+  return (
+    <div className="mt-2 max-w-2xl rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2">
+      <p className="text-xs font-semibold text-red-300">{tr("Hotspot problems the router found")}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-red-200">
+        {problems.map((p) => (
+          <li key={p.code}>{tr(p.message)}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -566,6 +588,7 @@ export default function RoutersPage() {
                         .join(" · ")}
                     </p>
                     <HealthStrip router={router} />
+                    <HotspotCheckResult router={router} />
                     {router.host && <SetupCommand routerId={router.id} />}
                   </div>
                 </div>

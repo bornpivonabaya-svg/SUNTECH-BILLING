@@ -256,7 +256,8 @@ describe("router health report", () => {
     expect(report).toContain("[:len [/ip hotspot active find]]");
     expect(report).toContain('[:parse ":return [:tostr [/system health print as-value]]"]');
     expect(report).toContain(`/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`);
-    expect(report.length).toBeLessThan(4000);
+    // RouterOS 6 returns at most 4 KB from fetch: its report leaves out the hotspot self-check.
+    expect(buildHeartbeatScript(callbackUrl, "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template", { hotspotCheck: false }).length).toBeLessThan(4000);
   });
 
   it("repairs the hotspot without piling up rules or rewriting settings every minute", () => {
@@ -271,6 +272,17 @@ describe("router health report", () => {
     for (const line of report.split("\n").filter((l) => /\/interface (wifi|wireless)\b/.test(l))) {
       expect(line).toMatch(/^:do \{:local mkgCmd \[:parse "/);
     }
-    expect(report.length).toBeLessThan(4000);
+    expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false }).length).toBeLessThan(4000);
+  });
+
+  it("checks its own hotspot and reports the counts, before posting", () => {
+    const report = buildHeartbeatScript(callbackUrl);
+    const check = report.indexOf('&hs=');
+    expect(check).toBeGreaterThan(0);
+    expect(check).toBeLessThan(report.indexOf("http-data=$d"));
+    for (const probe of ["[/ip hotspot find disabled=no]", "[/ip hotspot host find]", "[/ping 8.8.8.8 count=2]", ":resolve google.com", 'comment="MASHUPKGRID DNS"']) {
+      expect(report).toContain(probe);
+    }
+    expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })).not.toContain("&hs=");
   });
 });

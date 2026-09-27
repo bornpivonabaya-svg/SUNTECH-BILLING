@@ -8,6 +8,8 @@ import {
   createPendingRouter,
   getGeneratedCredentials,
   completeRouterProvisioning,
+  hotspotProblems,
+  type HotspotCheck,
   findRouterByProvisionToken,
   issueSetupCommand,
   isHeartbeatReport,
@@ -213,6 +215,8 @@ function toRouterSummary(router: RouterRow) {
     status: effectiveStatus,
     memoryUsedBytes: summary.memoryUsedBytes === null ? null : Number(summary.memoryUsedBytes),
     memoryTotalBytes: summary.memoryTotalBytes === null ? null : Number(summary.memoryTotalBytes),
+    // What the router's own hotspot check found wrong, in plain words (empty = all fine).
+    hotspotProblems: hotspotProblems(summary.hotspotCheck as HotspotCheck | null),
     diskFreeBytes: summary.diskFreeBytes === null ? null : Number(summary.diskFreeBytes),
     diskTotalBytes: summary.diskTotalBytes === null ? null : Number(summary.diskTotalBytes),
   };
@@ -1019,7 +1023,10 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     const loginTemplateUrl = tenantSlug
       ? `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
       : undefined;
-    reply.header("Content-Type", "text/plain; charset=utf-8").send(buildHeartbeatScript(callbackUrl, loginTemplateUrl));
+    reply.header("Content-Type", "text/plain; charset=utf-8").send(
+      // RouterOS 6's fetch returns at most 4 KB, too little for the hotspot self-check as well.
+      buildHeartbeatScript(callbackUrl, loginTemplateUrl, { hotspotCheck: !router.routerOsVersion?.startsWith("6") })
+    );
   });
 
   app.post("/provision/:token/callback", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
