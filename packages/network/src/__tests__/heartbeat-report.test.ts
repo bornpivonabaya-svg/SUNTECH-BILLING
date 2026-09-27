@@ -90,3 +90,13 @@ describe("the router's hotspot self-check", () => {
     expect(hotspotProblems(null)).toEqual([]);
   });
 });
+
+describe("the hotspot check's page and RADIUS readings", () => {
+  it("reads the page folder and flags an empty sign-in page or a silent RADIUS", () => {
+    const check = parseHotspotCheck("srv=1;dir=flash/hotspot;lsize=0;rreq=12;racc=0;rrej=0;rto=12");
+    expect(check).toMatchObject({ dir: "flash/hotspot", lsize: 0, rto: 12 });
+    expect(hotspotProblems(check).map((p) => p.code)).toEqual(["login-page-broken", "radius-silent"]);
+    expect(parseHotspotCheck("dir=../../etc;srv=1")).toEqual({ srv: 1 });
+    expect(hotspotProblems({ lsize: 5400, rreq: 9, racc: 3, rrej: 6, rto: 2 })).toEqual([]);
+  });
+});

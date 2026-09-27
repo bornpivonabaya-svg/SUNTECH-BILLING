@@ -40,9 +40,15 @@ export interface HotspotCheck {
   garden?: number; // walled-garden entries for the platform
   ping?: number; // of 2 pings to 8.8.8.8, answered
   dns?: number; // 1 when the router resolves names
+  dir?: string; // the hotspot's html-directory
+  lsize?: number; // size of its login.html, bytes
+  rreq?: number; // RADIUS requests the router sent
+  racc?: number; // … accepted
+  rrej?: number; // … rejected
+  rto?: number; // … that got no answer
 }
 
-const CHECK_KEYS: (keyof HotspotCheck)[] = ["srv", "hosts", "auth", "leases", "dnsnat", "login", "radios", "garden", "ping", "dns"];
+const CHECK_KEYS: (keyof HotspotCheck)[] = ["srv", "hosts", "auth", "leases", "dnsnat", "login", "radios", "garden", "ping", "dns", "lsize", "rreq", "racc", "rrej", "rto"];
 
 /** "srv=1;hosts=3;…;dns=1" → counts; unknown keys and non-numbers are dropped. */
 export function parseHotspotCheck(value: string | null): HotspotCheck | undefined {
@@ -50,9 +56,13 @@ export function parseHotspotCheck(value: string | null): HotspotCheck | undefine
   const check: HotspotCheck = {};
   for (const part of value.slice(0, 500).split(";")) {
     const [key, raw] = part.split("=", 2) as [string, string | undefined];
+    if (key === "dir" && raw && /^[\w./-]{1,64}$/.test(raw) && !raw.includes("..")) {
+      check.dir = raw;
+      continue;
+    }
     const n = Number(raw);
     if (CHECK_KEYS.includes(key as keyof HotspotCheck) && raw !== undefined && raw !== "" && Number.isInteger(n) && n >= 0 && n < 1_000_000) {
-      check[key as keyof HotspotCheck] = n;
+      (check as Record<string, number | string>)[key] = n;
     }
   }
   return Object.keys(check).length ? check : undefined;
@@ -77,6 +87,10 @@ export function hotspotProblems(check: HotspotCheck | null | undefined): Hotspot
   if (check.login === 0) out.push({ code: "no-login-page", message: "The sign-in page file (hotspot/login.html) is missing on the router." });
   if (check.radios === 0) out.push({ code: "wifi-not-bridged", message: "The Wi-Fi isn't part of the hotspot bridge, so Wi-Fi phones bypass the hotspot." });
   if (check.garden === 0) out.push({ code: "no-walled-garden", message: "The payment portal isn't in the walled garden, so the sign-in page can't open." });
+  if (check.lsize !== undefined && check.lsize < 200)
+    out.push({ code: "login-page-broken", message: `The sign-in page file in ${check.dir ?? "hotspot"} is empty or broken (${check.lsize} bytes), so phones get no sign-in page.` });
+  if ((check.rto ?? 0) > 0 && (check.racc ?? 0) === 0 && (check.rrej ?? 0) === 0)
+    out.push({ code: "radius-silent", message: `RADIUS never answered the router (${check.rto} timeouts): logins can't be checked. The server must allow UDP 1812-1813 and list this router's public IP.` });
   if (check.dnsnat !== undefined && check.dnsnat > 2) out.push({ code: "dns-rules-piled", message: `${check.dnsnat} copies of the DNS redirect rule (should be 2) are slowing the router.` });
   if (check.leases !== undefined && check.leases > 0 && check.hosts === 0 && check.srv !== 0)
     out.push({ code: "hosts-bypass", message: "Phones get an address but never reach the hotspot: it runs on a different port than the Wi-Fi." });
