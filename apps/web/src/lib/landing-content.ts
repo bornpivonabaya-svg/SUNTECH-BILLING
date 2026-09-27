@@ -120,28 +120,44 @@ export const DEFAULT_LANDING_CONTENT: LandingContent = {
     },
     {
       q: "Does MashupHost work with both MikroTik RouterOS v6 and v7?",
-      a: "Yes. Our native RouterOS client communicates directly with RouterOS v6.48+ LTS through the modern v7.12+ REST and API-TLS protocols. It automatically handles fast routing, active queues, interface address lists, and PPPoE binding without needing any external agents.",
+      a: "Yes. When you add a router you pick v6 or v7 (or let the script detect it), and the setup script uses the right commands for that version. It talks to the router over MikroTik's standard API. Remote WinBox needs v7, because it runs over WireGuard, which v6 doesn't have.",
     },
     {
-      q: "How does the Safaricom M-Pesa STK Push and Paybill reconciliation work?",
-      a: "When a subscriber pays via your Safaricom Paybill or initiates an instant STK push prompt from the customer portal, our Daraja 2.0 gateway matches the Paybill account number with the subscriber's account. Within 1.5 seconds, the ledger is credited, the invoice is marked PAID, and a RADIUS CoA disconnect signal is sent to the MikroTik router to un-throttle their speed instantly.",
+      q: "Can I open my router in WinBox remotely, even on a Safaricom or Airtel SIM?",
+      a: "Yes. Each router connects out to MashupHost over its own encrypted WireGuard tunnel, so it doesn't need a public IP or port forwarding and works behind carrier NAT. The dashboard gives you an address to type into WinBox, and you log in with the router's own admin account.",
     },
     {
-      q: "Can I manage multiple MikroTik routers and distributed POPs?",
-      a: "Absolutely. You can attach an unlimited number of core routers, base stations, and edge switches across multiple geographic sites. Each router is continuously monitored with real-time CPU, RAM, temperature, and link latency metrics.",
+      q: "Can I run hotspot and PPPoE on separate VLANs?",
+      a: "Yes. Add a VLAN in the dashboard, choose Hotspot or Internet (PPPoE), give it a subnet, and the platform sets it up on the router for you: the VLAN on a free port, its addresses, and its own hotspot or PPPoE server. If the router is offline it finishes when the router comes back. An in-app manual shows how to patch the switch.",
     },
     {
-      q: "Does the platform support high-volume hotspot voucher printing?",
-      a: "Yes. You can generate thousands of hotspot vouchers in batches with custom prefixes, expiration hours, and upload/download data quotas. Print them in customizable 3x8 or 4x10 grid voucher sheets with QR codes for instantaneous subscriber phone camera logins.",
+      q: "How does M-Pesa reconciliation work?",
+      a: "Payments by STK push, Paybill or Till are matched to the customer's account number automatically. The invoice is marked paid, the customer's service is switched back on at the router within about a minute, and they get a confirmation. Anything that can't be matched waits in a reconciliation list for you to assign.",
     },
     {
-      q: "Can I white-label the dashboard with my own ISP logo and custom domain?",
-      a: "Yes! MashupHost features full multi-tenant white-labeling. You can set your own ISP brand name, primary theme colors, custom logo, and host the customer portal on your own domain (e.g., portal.yourisp.co.ke).",
+      q: "Can I manage several routers and sites?",
+      a: "Yes. Add as many MikroTik routers as your plan allows, group them by branch, and watch each one's CPU, memory and uptime on health graphs. Staff are alerted when a router goes down, and config backups and RouterOS updates run on a schedule.",
+    },
+    {
+      q: "Can agents or shops sell my vouchers?",
+      a: "Yes. Invite agents with a link; they get their own simple app to sell vouchers and record sales, and you set their commission, track what each one owes you and record their payments.",
+    },
+    {
+      q: "Does it support hotspot voucher printing?",
+      a: "Yes. Generate voucher batches for any package and print them, including on small thermal receipt printers with a QR code the customer scans to log in. Vouchers can also be sent straight to a customer on WhatsApp.",
+    },
+    {
+      q: "Can I use my own logo and domain?",
+      a: "Yes. Your logo and colours appear on the dashboard, customer app and captive portal. Type your domain and MashupHost detects who runs its DNS — Namecheap, GoDaddy, Hostinger, Cloudflare, Truehost and others — shows the exact record to add, and switches the domain on by itself once it's in place.",
+    },
+    {
+      q: "Is it available in Kiswahili?",
+      a: "Yes. The dashboard, the customer app, the captive portal and the support assistant all switch between English and Kiswahili.",
     },
   ],
   footer: {
     description:
-      "Precision billing, native MikroTik RouterOS API control, FreeRADIUS subscriber accounting, and automated Safaricom M-Pesa collections for telecom operators in East Africa.",
+      "ISP billing and hotspot software for Kenya: M-Pesa collections, MikroTik and RADIUS control, remote WinBox and automatic VLANs, in English and Kiswahili.",
     copyrightYear: "2026",
     supportEmail: "support@mashupkgrid.com",
     supportPhone: "+254 703 605 266",
