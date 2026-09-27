@@ -1014,7 +1014,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       return;
     }
     const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${token}/callback`;
-    const tenantSlug = router.tenant?.slug;
+    // The ISP's own sign-in page, which the report puts back if the router ever loses it.
+    const tenantSlug = (await prisma.tenant.findUnique({ where: { id: router.tenantId }, select: { slug: true } }))?.slug;
     const loginTemplateUrl = tenantSlug
       ? `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
       : undefined;

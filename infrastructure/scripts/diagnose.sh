@@ -44,7 +44,7 @@ run "${COMPOSE[@]}" logs --no-color --tail 8 migrate
 
 section "Settings (secrets show only set / not set)"
 SHOW="NODE_ENV APP_API_PUBLIC_URL APP_PORTAL_URL ROUTER_API_BASE_URL RADIUS_SERVER_HOST ENABLE_EMBEDDED_RADIUS_SERVER RADIUS_AUTH_PORT RADIUS_ACCT_PORT ENABLE_WIREGUARD_REMOTE_ACCESS WIREGUARD_INTERFACE WIREGUARD_SUBNET_CIDR WIREGUARD_SERVER_ENDPOINT WIREGUARD_LISTEN_PORT ENABLE_WINBOX_RELAY WINBOX_RELAY_PORT_RANGE ROUTER_MANAGEMENT_SOURCE TRUST_PROXY SANITY_PROJECT_ID SANITY_DATASET"
-SECRET="MPESA_CALLBACK_TOKEN MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_PASSKEY WIREGUARD_SERVER_PUBLIC_KEY WIREGUARD_SERVER_PRIVATE_KEY ENCRYPTION_KEY JWT_SECRET SANITY_READ_TOKEN SANITY_REVALIDATE_SECRET"
+SECRET="MPESA_CALLBACK_TOKEN MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_PASSKEY WIREGUARD_SERVER_PUBLIC_KEY WIREGUARD_SERVER_PRIVATE_KEY ENCRYPTION_KEY JWT_ACCESS_SECRET JWT_REFRESH_PEPPER SANITY_READ_TOKEN SANITY_REVALIDATE_SECRET"
 for k in $SHOW; do printf '%-34s %s\n' "$k" "$(env_value "$k" || true)"; done
 for k in $SECRET; do printf '%-34s %s\n' "$k" "$([ -n "$(env_value "$k")" ] && echo set || echo 'NOT SET')"; done
 
@@ -62,6 +62,12 @@ for url in "$(env_value APP_API_PUBLIC_URL)/health" "$(env_value APP_PORTAL_URL)
 done
 
 section "WireGuard (remote management)"
+echo "A working router shows 'latest handshake' under its peer. None = the tunnel has never connected."
+ACTUAL_WG_KEY=$("${COMPOSE[@]}" exec -T api sh -c 'wg show wg0 public-key 2>/dev/null' 2>/dev/null | tr -d '\r')
+if [ -z "$ACTUAL_WG_KEY" ]; then echo "server key check: wg0 is not up in the api container"
+elif [ "$ACTUAL_WG_KEY" = "$(env_value WIREGUARD_SERVER_PUBLIC_KEY)" ]; then echo "server key check: routers are given the server's real key (OK)"
+else echo "server key check: MISMATCH — routers are given WIREGUARD_SERVER_PUBLIC_KEY, which is not wg0's key, so no router can ever connect"; fi
+echo "If every peer lacks a handshake and the key is OK: allow UDP 51820 INBOUND in the Azure Network Security Group."
 run "${COMPOSE[@]}" exec -T api sh -c 'wg show 2>/dev/null | grep -E "^(interface|peer|  latest handshake|  transfer|  allowed ips|  listening port)" | sed -E "s/^(peer: ).*/\1<hidden>/" || echo "wg not running in the api container"'
 
 section "Recent errors — api (RADIUS runs in the worker)"
@@ -77,7 +83,9 @@ section "Routers"
 sql "SELECT t.slug AS isp, r.name, r.status, r.host, r.\"vpnIp\",
             to_char(r.\"lastSeenAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi','DD Mon HH24:MI:SS') AS last_seen_eat,
             r.\"cpuLoadPercent\" AS cpu, r.\"temperatureC\" AS temp, r.\"activeUsers\" AS users,
-            r.\"routerOsVersion\" AS ros, r.\"boardName\" AS board, left(r.\"lastError\", 70) AS last_error
+            r.\"routerOsVersion\" AS ros, r.\"boardName\" AS board, r.\"vpnStatus\" AS vpn,
+            to_char(r.\"vpnHandshakeAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi','HH24:MI') AS vpn_seen,
+            left(r.\"lastError\", 60) AS last_error
      FROM routers r JOIN tenants t ON t.id = r.\"tenantId\"
      WHERE r.\"deletedAt\" IS NULL ORDER BY r.\"lastSeenAt\" DESC NULLS LAST LIMIT 20;"
 echo "--- RADIUS clients (routers allowed to ask RADIUS; source address must match the router's public IP)"
@@ -92,6 +100,7 @@ sql "SELECT to_char(s.\"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nair
      ORDER BY s.\"createdAt\" DESC LIMIT 15;"
 echo "--- M-Pesa callbacks received (last 15). None at all = Safaricom can't reach the callback URL."
 sql "SELECT to_char(\"receivedAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi','DD Mon HH24:MI:SS') AS at_eat, \"eventType\", status,
+            payload->'Body'->'stkCallback'->>'ResultCode' AS mpesa_code,
             left(coalesce(\"errorMessage\", ''), 60) AS error, \"sourceIp\"
      FROM payment_webhook_events WHERE provider = 'MPESA' ORDER BY \"receivedAt\" DESC LIMIT 15;"
 echo "--- M-Pesa settings per ISP (no secrets)"

@@ -517,20 +517,33 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     : `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}};`;
   return [
     `{`,
-    `:do {/interface bridge port add bridge=bridge interface=wlan1} on-error={};`,
-    `:do {/interface bridge port add bridge=bridge interface=wifi1} on-error={};`,
-    `:do {/interface wireless set [find name=wlan1] disabled=no mode=ap-bridge} on-error={};`,
-    `:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap} on-error={};`,
-    `:do {/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8} on-error={};`,
-    `:do {/ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"} on-error={};`,
-    `:do {/ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"} on-error={};`,
-    `:do {/ip hotspot profile set [find] html-directory=hotspot use-radius=yes login-by=mac,http-chap,http-pap,cookie} on-error={};`,
-    `:do {/ip hotspot set [find interface=bridge] profile=default disabled=no} on-error={};`,
+    // Self-repair, each change made only when something is actually wrong, so a healthy router
+    // writes nothing every minute. Radio commands go through deferred(): a router without that
+    // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
+    deferred(`/interface bridge port add bridge=bridge interface=wlan1`),
+    deferred(`/interface bridge port add bridge=bridge interface=wifi1`),
+    deferred(`/interface wireless set [find name=wlan1 disabled=yes] disabled=no mode=ap-bridge`),
+    deferred(`/interface wifi set [find default-name=wifi1 disabled=yes] disabled=no configuration.mode=ap`),
+    `:do {:if ([/ip dns get allow-remote-requests] = false) do={/ip dns set allow-remote-requests=yes}} on-error={}`,
+    `:do {:if ([:len [/ip dns get servers]] = 0) do={/ip dns set servers=1.1.1.1,8.8.8.8}} on-error={}`,
+    // Customers' DNS goes to the router (a phone with a hard-coded 8.8.8.8 otherwise never sees
+    // the sign-in page). Exactly one pair of rules: any other count — none, or the duplicates an
+    // earlier version added every minute — is cleared and replaced.
+    `:do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]; /ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"; /ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"}} on-error={}`,
+    // Every hotspot profile: RADIUS on, and pointed at a folder that really has the sign-in page.
+    `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; :if ([:len [/file find name=($dir . "/login.html")]] = 0) do={:if ([:len [/file find name="flash/hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=flash/hotspot} else={:if ([:len [/file find name="hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=hotspot}}}; :if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`,
+    `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
     portalSelfRepair,
-    `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")});`,
-    `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={};`,
-    `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={};`,
-    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no;`,
+    // cpu-load is the last second's load, and this runs straight after the router fetched it over
+    // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
+    `:delay 3s`,
+    `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")})`,
+    `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={}`,
+    `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={}`,
+    // The management VPN (RouterOS 7): whether mkg-wg exists, and how long since its last
+    // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
+    `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
+    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
     `}`,
     "",
   ].join("\n");

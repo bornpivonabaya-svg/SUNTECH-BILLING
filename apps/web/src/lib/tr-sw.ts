@@ -1079,4 +1079,7 @@ export const SW: Record<string, string> = {
   "Get setup command": "Pata amri ya kusanidi",
   "Setup command": "Amri ya kusanidi",
   "Paste this into WinBox → New Terminal on this router. It keeps its settings and customers, and stays online while it updates.": "Bandika hii kwenye WinBox → New Terminal ya ruta hii. Inabaki na mipangilio na wateja wake, na inaendelea kuwa mtandaoni inaposasishwa.",
+  "connected": "imeunganishwa",
+  "not connecting": "haiunganishi",
+  "not set up": "haijasanidiwa",
 };

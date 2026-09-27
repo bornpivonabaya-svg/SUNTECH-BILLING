@@ -2040,6 +2040,10 @@ model Router {
   diskTotalBytes       BigInt?
   /// Hotspot users signed in on the router at its last report.
   activeUsers          Int?
+  /// The management VPN as the router itself reports it: "none" (no WireGuard interface), "no-peer",
+  /// "waiting" (never connected) or "connected"; vpnHandshakeAt is its last handshake.
+  vpnStatus            String?
+  vpnHandshakeAt       DateTime?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   deletedAt            DateTime?

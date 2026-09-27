@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHeartbeatReport, parseHealthSensors, parseHeartbeatReport, parseUptimeSeconds } from "../heartbeat-report.js";
+import { isHeartbeatReport, parseHealthSensors, parseHeartbeatReport, parseUptimeSeconds, parseVpnReport } from "../heartbeat-report.js";
 
 // Built exactly as the router's heartbeat script builds it (buildHeartbeatScript).
 const v7Body =
@@ -51,5 +51,22 @@ describe("the router's once-a-minute report", () => {
     expect(parseUptimeSeconds("1w2d3h4m5s")).toBe(788645);
     expect(parseUptimeSeconds("1w2d03:04:05")).toBe(788645);
     expect(parseUptimeSeconds("00:00:30")).toBe(30);
+  });
+});
+
+describe("the router's VPN report", () => {
+  const now = Date.parse("2026-09-27T12:00:00Z");
+  it("tells apart no interface, no peer, never connected, connected and dropped", () => {
+    expect(parseVpnReport("0", now)).toEqual({ vpnStatus: "none" });
+    expect(parseVpnReport("1", now)).toEqual({ vpnStatus: "no-peer" });
+    expect(parseVpnReport("1,", now)).toEqual({ vpnStatus: "waiting" });
+    expect(parseVpnReport("1,1m20s", now)).toEqual({ vpnStatus: "connected", vpnHandshakeAt: new Date(now - 80_000) });
+    expect(parseVpnReport("1,00:10:00", now)).toEqual({ vpnStatus: "waiting", vpnHandshakeAt: new Date(now - 600_000) });
+    expect(parseVpnReport(null, now)).toEqual({});
+    expect(parseVpnReport("garbage", now)).toEqual({});
+  });
+
+  it("is read from the same report as the rest", () => {
+    expect(parseHeartbeatReport("cpu=3&wg=1,").vpnStatus).toBe("waiting");
   });
 });

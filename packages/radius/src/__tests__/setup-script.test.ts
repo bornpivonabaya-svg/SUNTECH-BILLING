@@ -258,4 +258,19 @@ describe("router health report", () => {
     expect(report).toContain(`/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`);
     expect(report.length).toBeLessThan(4000);
   });
+
+  it("repairs the hotspot without piling up rules or rewriting settings every minute", () => {
+    const report = buildHeartbeatScript(callbackUrl, "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template");
+    // DNS redirect: only when the count of its rules isn't exactly 2, and old ones removed first.
+    expect(report).toContain('[:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]');
+    expect(report).not.toMatch(/^:do \{\/ip firewall nat add/m);
+    // Settings change only when wrong, never unconditionally.
+    expect(report).not.toContain("/ip hotspot profile set [find]");
+    expect(report).not.toMatch(/^:do \{\/ip dns set/m);
+    // Radio menus a router may lack can't fail the whole report.
+    for (const line of report.split("\n").filter((l) => /\/interface (wifi|wireless)\b/.test(l))) {
+      expect(line).toMatch(/^:do \{:local mkgCmd \[:parse "/);
+    }
+    expect(report.length).toBeLessThan(4000);
+  });
 });
