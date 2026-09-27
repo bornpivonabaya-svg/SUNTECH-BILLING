@@ -51,14 +51,18 @@ if [ ! -f ".env.production" ]; then
   exit 1
 fi
 
-log_info "1/5 Fetching latest commits from GitHub origin/main..."
-git fetch origin main
+# Which branch to run. The GitHub deploy workflow passes the branch that was pushed; by hand it
+# defaults to main.
+BRANCH="${DEPLOY_BRANCH:-main}"
+log_info "1/5 Fetching latest commits from GitHub origin/${BRANCH}..."
+git fetch origin "$BRANCH"
 LOCAL_HASH=$(git rev-parse HEAD)
-REMOTE_HASH=$(git rev-parse origin/main)
+REMOTE_HASH=$(git rev-parse "origin/${BRANCH}")
 
-if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
-  log_info "New commits found! Updating from $LOCAL_HASH to $REMOTE_HASH..."
-  git pull origin main
+if [ "$LOCAL_HASH" != "$REMOTE_HASH" ] || [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
+  log_info "Updating to ${BRANCH} @ ${REMOTE_HASH} (was ${LOCAL_HASH})..."
+  # Tracked files only: .env.production and the data folders are untracked and left alone.
+  git checkout -B "$BRANCH" "origin/${BRANCH}"
 else
   log_info "Git is already up to date ($LOCAL_HASH)."
 fi

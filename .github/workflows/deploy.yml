@@ -1,0 +1,111 @@
+# Push → checked → live. Every push to main (or the working branch below) runs the tests and
+# type checks; if they pass, GitHub logs into the server over SSH and runs
+# infrastructure/scripts/deploy-prod.sh for the pushed branch, then checks the site answers.
+# A failing check never reaches the server.
+#
+# One-time setup (repository → Settings → Secrets and variables → Actions → New secret):
+#   DEPLOY_HOST      server IP or hostname, e.g. 68.210.187.104
+#   DEPLOY_USER      SSH user, e.g. azureuser
+#   DEPLOY_SSH_KEY   private key whose public half is in that user's ~/.ssh/authorized_keys
+#   DEPLOY_PORT      optional, default 22
+#   DEPLOY_PATH      optional, default /opt/mashuphost
+#   SITE_URL         optional, default https://mashuphost.tech (checked after deploying)
+#   SANITY_AUTH_TOKEN optional: a Sanity "Deploy Studio" token; the Studio redeploys too
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - claude/system-nav-ui-automation-zof6ye
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one instead of cutting it off.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Tests and type checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+      # Dummy values: the tests mock the database, Redis and every external service.
+      JWT_ACCESS_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      JWT_REFRESH_PEPPER: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      ENCRYPTION_KEY: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/ci
+      REDIS_URL: redis://127.0.0.1:1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mashupkgrid/database exec prisma generate
+      - name: Type check
+        run: pnpm -r exec tsc --noEmit
+      - name: Tests
+        run: pnpm test
+
+  deploy:
+    name: Deploy to server
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HAS_SERVER: ${{ secrets.DEPLOY_HOST != '' && secrets.DEPLOY_SSH_KEY != '' }}
+    steps:
+      - name: Server not set up yet
+        if: env.HAS_SERVER != 'true'
+        run: echo "::warning::Add the DEPLOY_HOST, DEPLOY_USER and DEPLOY_SSH_KEY secrets to deploy automatically (see the top of this file)."
+      - name: Update and restart on the server
+        if: env.HAS_SERVER == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          command_timeout: 35m
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH || '/opt/mashuphost' }}"
+            git fetch origin "${{ github.ref_name }}"
+            # The script itself may have changed in this push: run the pushed version.
+            git show "origin/${{ github.ref_name }}:infrastructure/scripts/deploy-prod.sh" > /tmp/mashuphost-deploy.sh
+            DEPLOY_BRANCH="${{ github.ref_name }}" bash /tmp/mashuphost-deploy.sh "$(pwd)"
+      - name: Check the site answers
+        if: env.HAS_SERVER == 'true'
+        run: |
+          url="${{ secrets.SITE_URL || 'https://mashuphost.tech' }}"
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
+            if [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; then echo "$url answered $code"; exit 0; fi
+            echo "waiting for $url (got $code)"; sleep 15
+          done
+          echo "::error::$url did not come back after the deploy"; exit 1
+
+  studio:
+    name: Deploy Sanity Studio
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SANITY_AUTH_TOKEN: ${{ secrets.SANITY_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: env.SANITY_AUTH_TOKEN != ''
+        with:
+          node-version: 22
+      - name: Build and deploy the Studio
+        if: env.SANITY_AUTH_TOKEN != ''
+        working-directory: studio
+        run: |
+          npm ci --no-audit --no-fund
+          npx sanity deploy --yes
