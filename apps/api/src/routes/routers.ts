@@ -419,7 +419,10 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
       // reconfigures Wi-Fi, the bridge and management access, which drops a WinBox session made
       // through them — and an /import run inside that session dies with it, half-applied. Its
       // output goes to mkg-setup.txt on the router for troubleshooting.
-      const fetchCommand = `/tool fetch url="${routerApiBase()}/api/v1/routers/provision/${provisionToken}/setup.rsc" dst-path=setup.rsc; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in MashupHost within a minute."`;
+      // It checks in as soon as the download works, so a router that reached us always shows up
+      // on the dashboard, whatever happens in the setup after it.
+      const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
+      const fetchCommand = `/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in MashupHost within a minute."`;
       reply.send(successResponse({ script, fetchCommand, oneLiner: fetchCommand }, request.id));
     }
   );

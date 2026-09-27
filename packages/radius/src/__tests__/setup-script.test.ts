@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Router } from "@mashupkgrid/database";
-import { buildMikrotikProvisioningScript, buildMikrotikWinboxScript, deferred, managementSources } from "../setup-script.js";
+import {
+  buildMikrotikProvisioningScript as buildRawScript,
+  buildMikrotikWinboxScript,
+  deferred,
+  managementSources,
+  plainCommands,
+} from "../setup-script.js";
+
+/** The script as the plain commands it runs (each is wrapped in :parse on the router). */
+const buildMikrotikProvisioningScript = (...args: Parameters<typeof buildRawScript>) => plainCommands(buildRawScript(...args));
 
 const router = { id: "11111111-1111-1111-1111-111111111111", name: "hAP test", apiPort: 8728, useTls: false } as unknown as Router;
 const credentials = { username: "mashupkgrid-api", password: "router-generated-secret" };
@@ -164,10 +173,23 @@ describe("router setup script — RouterOS version chosen when adding the router
     // on a hAP lite rejected the entire script, check-in included.
     const onlySome = /\/interface (wifi|wireless|wireguard)\b|\/system ntp client/;
     for (const routerOsMajor of [6, 7, null]) {
-      const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, routerOsMajor });
+      const script = buildRawScript(router, credentials, callbackUrl, { ...base, routerOsMajor });
       for (const line of script.split("\n").filter((l) => !l.startsWith("#") && onlySome.test(l))) {
         expect(line).toMatch(/^:do \{:local mkgCmd \[:parse "/);
       }
+    }
+  });
+
+  it("hands every command to :parse, so no line can make RouterOS reject the whole file", () => {
+    for (const routerOsMajor of [6, 7, null]) {
+      const script = buildRawScript(router, credentials, callbackUrl, { ...base, routerOsMajor, blockTethering: true, pppoeInterface: "ether5" });
+      const commands = script.split("\n").filter((l) => l.includes("/") && !l.startsWith("#") && !l.startsWith(":put"));
+      expect(commands.length).toBeGreaterThan(100);
+      for (const line of commands) {
+        expect(line.startsWith(":do {:local mkgCmd [:parse \"") || line.startsWith(":if ([:pick [/system resource get version]")).toBe(true);
+      }
+      // The check-in still comes before anything that could drop the connection.
+      expect(plainCommands(script).indexOf("/callback\" http-method=post keep-result=no")).toBeLessThan(plainCommands(script).indexOf("/user add"));
     }
   });
 
@@ -202,6 +224,11 @@ describe("router setup script — anti-tethering", () => {
 });
 
 describe("deferred commands", () => {
+  it("reads back as the exact command it wraps", () => {
+    const command = '/system scheduler add name=x on-event=":do {/tool fetch url=\\"https://x\\" http-data=\\$k} on-error={}"';
+    expect(plainCommands(deferred(command))).toBe(`:do {${command}} on-error={}`);
+  });
+
   it("escapes quotes and variables so the text reaches :parse unchanged", () => {
     expect(deferred('/tool fetch url="https://x/y" http-data=$key\n:delay 2s')).toBe(
       ':do {:local mkgCmd [:parse "/tool fetch url=\\"https://x/y\\" http-data=\\$key; :delay 2s"]; $mkgCmd} on-error={}'
