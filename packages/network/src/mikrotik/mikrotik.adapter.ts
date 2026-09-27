@@ -648,6 +648,45 @@ export class MikroTikAdapter implements NetworkDeviceAdapter {
       changes.push("downloaded hotspot/alogin.html");
     }
 
+    // Anti-tethering once lived in the filter table's forward chain, which sees a packet's TTL
+    // after the router has taken one off, so it dropped every phone's own traffic ("logged in,
+    // nothing loads"). Move any such rules to mangle prerouting (see antiTetheringRules in the
+    // setup script), keeping whether the router had it on for everyone.
+    const tetherFilters = (await client.print(["/ip/firewall/filter/print", "=.proplist=.id,comment,hotspot"])).filter(
+      (f) => f["comment"] === "MASHUPKGRID ANTI-TETHER" && f[".id"]
+    );
+    if (tetherFilters.length > 0) {
+      const globalOn = tetherFilters.some((f) => (f["hotspot"] ?? "").includes("auth"));
+      for (const f of tetherFilters) {
+        assertNoTrap(await client.talk(["/ip/firewall/filter/remove", `=.id=${f[".id"]}`]), "/ip/firewall/filter/remove");
+      }
+      const existing = await client.print(["/ip/firewall/mangle/print", "=.proplist=.id,comment"]);
+      for (const m of existing) {
+        if (m["comment"] === "MASHUPKGRID ANTI-TETHER" && m[".id"]) {
+          assertNoTrap(await client.talk(["/ip/firewall/mangle/remove", `=.id=${m[".id"]}`]), "/ip/firewall/mangle/remove");
+        }
+      }
+      const matches: string[][] = [...(globalOn ? [["=hotspot=auth"]] : []), ['=src-address-list=mashup-anti-tether']];
+      for (const match of matches) {
+        for (const ttl of [63, 127, 254]) {
+          assertNoTrap(
+            await client.talk([
+              "/ip/firewall/mangle/add",
+              "=chain=prerouting",
+              ...match,
+              `=ttl=equal:${ttl}`,
+              "=action=change-ttl",
+              "=new-ttl=set:1",
+              "=passthrough=no",
+              "=comment=MASHUPKGRID ANTI-TETHER",
+            ]),
+            "/ip/firewall/mangle/add"
+          );
+        }
+      }
+      changes.push(`moved anti-tethering to prerouting${globalOn ? " (all hotspot users)" : ""}; phones were being blocked`);
+    }
+
     const servers = await client.print(["/radius/print"]);
     const retired = new Set(opts.retiredRadiusHosts ?? []);
     for (const s of servers) {

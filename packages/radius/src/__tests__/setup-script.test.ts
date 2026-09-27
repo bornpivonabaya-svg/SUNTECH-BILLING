@@ -176,3 +176,15 @@ describe("router setup script — the 'you're online' page", () => {
     expect(script).toMatch(/mkg-portal-page.*hotspot\/login\.html.*hotspot\/alogin\.html/);
   });
 });
+
+describe("router setup script — anti-tethering", () => {
+  it("matches TTL in mangle prerouting, never in the forward chain where every phone looks tethered", () => {
+    for (const blockTethering of [true, false]) {
+      const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { blockTethering });
+      expect(script).not.toMatch(/\/ip firewall filter add[^\n]*ttl=/);
+      expect(script).toContain('/ip firewall filter remove [find comment="MASHUPKGRID ANTI-TETHER"]');
+      expect(script).toContain('/ip firewall mangle add chain=prerouting src-address-list="mashup-anti-tether" ttl=equal:63 action=change-ttl new-ttl=set:1');
+      expect(script.includes("chain=prerouting hotspot=auth ttl=equal:63")).toBe(blockTethering);
+    }
+  });
+});

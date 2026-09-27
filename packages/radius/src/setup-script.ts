@@ -134,27 +134,34 @@ function hostWithSubdomains(host: string): string[] {
  *  So it raises the cost of casual sharing — which is nearly all of it — rather than stopping a
  *  determined person. That is why it is opt-in per router: an operator turns it on where sharing
  *  is actually costing them, and leaves it off where a wrongly-blocked customer is worse. */
-function buildAntiTetheringSection(enabled: boolean): string {
-  if (!enabled) {
-    return `# 10. Anti-tethering: Package-level enforcement active via RADIUS address list.
-/ip firewall filter remove [find comment="MASHUPKGRID ANTI-TETHER"]
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:63 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:127 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:254 action=drop comment="MASHUPKGRID ANTI-TETHER"
-:do {/ip firewall filter move [find comment="MASHUPKGRID ANTI-TETHER"] destination=0} on-error={}
-:put "Per-package Anti-tethering filter active"`;
-  }
+export const ANTI_TETHER_COMMENT = "MASHUPKGRID ANTI-TETHER";
 
-  return `# 10. Anti-tethering: Global router + package enforcement active.
-/ip firewall filter remove [find comment="MASHUPKGRID ANTI-TETHER"]
-/ip firewall filter add chain=forward hotspot=auth ttl=equal:63 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward hotspot=auth ttl=equal:127 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward hotspot=auth ttl=equal:254 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:63 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:127 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:254 action=drop comment="MASHUPKGRID ANTI-TETHER"
-:do {/ip firewall filter move [find comment="MASHUPKGRID ANTI-TETHER"] destination=0} on-error={}
-:put "Anti-tethering active — one device per voucher enforced at the network level"`;
+function buildAntiTetheringSection(enabled: boolean): string {
+  return antiTetheringRules(enabled).join("\n");
+}
+
+/**
+ * The rules, in the mangle table's prerouting chain. Prerouting sees a packet's TTL exactly as the
+ * customer's device sent it (64 from their phone, 63 from a device sharing through it); the filter
+ * table's forward chain sees it after the router has already taken one off, so matching 63 there
+ * dropped every phone's own traffic — customers were "logged in" with nothing loading. Here a
+ * shared packet's TTL is set to 1, so the router discards it instead of forwarding it, and the
+ * paying device is never touched.
+ *
+ * Also clears the old forward-chain rules, from routers set up before this changed.
+ */
+export function antiTetheringRules(globalOn: boolean): string[] {
+  const rule = (match: string, ttl: number) =>
+    `/ip firewall mangle add chain=prerouting ${match} ttl=equal:${ttl} action=change-ttl new-ttl=set:1 passthrough=no comment="${ANTI_TETHER_COMMENT}"`;
+  const ttls = [63, 127, 254];
+  return [
+    `# 10. Anti-tethering: ${globalOn ? "every signed-in hotspot device, plus packages that ask for it" : "only packages that ask for it (via their RADIUS address list)"}.`,
+    `/ip firewall filter remove [find comment="${ANTI_TETHER_COMMENT}"]`,
+    `/ip firewall mangle remove [find comment="${ANTI_TETHER_COMMENT}"]`,
+    ...(globalOn ? ttls.map((t) => rule("hotspot=auth", t)) : []),
+    ...ttls.map((t) => rule(`src-address-list="mashup-anti-tether"`, t)),
+    `:put "Anti-tethering rules in place (shared connections blocked, the paying device untouched)"`,
+  ];
 }
 
 /** Standalone script to install or refresh the per-app package filter on an existing router. */

@@ -4,7 +4,7 @@ import { MikroTikAdapter } from "../mikrotik/mikrotik.adapter.js";
 type Row = Record<string, string>;
 
 /** A router as the RouterOS API sees it: files, RADIUS servers, and a record of every write. */
-function fakeRouter(state: { files: string[]; radius: Row[]; walledIp?: Row[]; walledHttp?: Row[] }) {
+function fakeRouter(state: { files: string[]; radius: Row[]; walledIp?: Row[]; walledHttp?: Row[]; filters?: Row[] }) {
   const writes: string[][] = [];
   const client = {
     print: vi.fn(async (words: string[]) => {
@@ -12,6 +12,7 @@ function fakeRouter(state: { files: string[]; radius: Row[]; walledIp?: Row[]; w
       if (words[0] === "/radius/print") return state.radius;
       if (words[0] === "/ip/hotspot/walled-garden/ip/print") return state.walledIp ?? [];
       if (words[0] === "/ip/hotspot/walled-garden/print") return state.walledHttp ?? [];
+      if (words[0] === "/ip/firewall/filter/print") return state.filters ?? [];
       return [];
     }),
     talk: vi.fn(async (words: string[]) => {
@@ -75,5 +76,26 @@ describe("router hotspot self-repair", () => {
     });
     expect(await adapter.ensureHotspotProvisioning(opts)).toEqual([]);
     expect(writes).toEqual([]);
+  });
+
+  it("moves anti-tethering out of the forward chain, where it blocked every phone", async () => {
+    const { adapter, writes } = fakeRouter({
+      files: ["hotspot/login.html", "hotspot/alogin.html"],
+      radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }],
+      filters: [
+        { ".id": "*A", comment: "MASHUPKGRID ANTI-TETHER", hotspot: "auth" },
+        { ".id": "*B", comment: "MASHUPKGRID ANTI-TETHER" },
+        { ".id": "*C", comment: "something the operator added" },
+      ],
+    });
+    const changes = await adapter.ensureHotspotProvisioning(opts);
+    expect(changes).toContain("moved anti-tethering to prerouting (all hotspot users); phones were being blocked");
+    expect(writes).toContainEqual(["/ip/firewall/filter/remove", "=.id=*A"]);
+    expect(writes).toContainEqual(["/ip/firewall/filter/remove", "=.id=*B"]);
+    expect(writes).not.toContainEqual(["/ip/firewall/filter/remove", "=.id=*C"]);
+    const mangles = writes.filter((w) => w[0] === "/ip/firewall/mangle/add");
+    expect(mangles).toHaveLength(6);
+    for (const m of mangles) expect(m).toEqual(expect.arrayContaining(["=chain=prerouting", "=action=change-ttl", "=new-ttl=set:1"]));
+    expect(mangles.filter((m) => m.includes("=hotspot=auth"))).toHaveLength(3);
   });
 });
