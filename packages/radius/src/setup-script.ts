@@ -561,8 +561,9 @@ const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=
 /**
  * Makes sure every hotspot can show the sign-in page. For each hotspot profile it reads the
  * folder that profile really serves pages from (html-directory — "hotspot" or "flash/hotspot"
- * depending on the board), and if that folder's login.html is missing or cut short (under 200
- * bytes) it rebuilds the hotspot's default pages there (reset-html, for that exact hotspot) and
+ * depending on the board), and if that folder's login.html is missing, cut short (under 200
+ * bytes) or not the platform's (no "mkg-portal" marker — MikroTik's stock page, which can't take
+ * payments) it rebuilds the hotspot's default pages there (reset-html, for that exact hotspot) and
  * downloads the ISP's sign-in and "you're online" pages into the same folder. A router with the
  * page missing answers every phone with "Error 404 : Not Found", which Android shows as
  * "Connected, no internet". Nothing is written when the page is fine. reset-html goes through
@@ -577,7 +578,9 @@ function portalRepair(loginUrl: string | undefined, aloginUrl: string | null): s
     `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; ` +
     `:if ([:len $dir] = 0) do={:set dir "hotspot"; /ip hotspot profile set $p html-directory=hotspot}; ` +
     `:local ok false; :local f [/file find name=($dir . "/login.html")]; ` +
-    `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:set ok true}}; ` +
+    (loginUrl
+      ? `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:if ([:typeof [:find [/file get ($f->0) contents] "mkg-portal"]] = "num") do={:set ok true}}}; `
+      : `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:set ok true}}; `) +
     `:if ($ok = false) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}; ${fetches}}; ` +
     `:if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`
   );

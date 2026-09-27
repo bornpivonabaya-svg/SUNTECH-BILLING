@@ -234,6 +234,63 @@ async function getNas(sourceAddress: string): Promise<{ secret: string; tenantId
   return nas ?? null;
 }
 
+/** RFC 3579 §3.2 — an Access-Request's Message-Authenticator is HMAC-MD5 over the whole packet
+ *  with that attribute's value zeroed, keyed by the shared secret. RouterOS 7 sends one. Returns
+ *  null when the packet carries none (RouterOS 6), so the caller can't prove the sender. */
+export function verifyRequestMessageAuthenticator(packet: Buffer, secret: string): boolean | null {
+  if (packet.length < 20) return null;
+  const length = Math.min(packet.readUInt16BE(2), packet.length);
+  let offset = 20;
+  while (offset + 2 <= length) {
+    const type = packet[offset]!;
+    const attrLen = packet[offset + 1]!;
+    if (attrLen < 2 || offset + attrLen > length) return null;
+    if (type === ATTR.MESSAGE_AUTHENTICATOR && attrLen === 18) {
+      const copy = Buffer.from(packet.subarray(0, length));
+      copy.fill(0, offset + 2, offset + 18);
+      const expected = createHmac("md5", Buffer.from(secret, "utf8")).update(copy).digest();
+      return timingSafeEqual(expected, packet.subarray(offset + 2, offset + 18));
+    }
+    offset += attrLen;
+  }
+  return null;
+}
+
+/**
+ * The NAS a signed packet really came from. A router's RADIUS normally arrives from the address
+ * its heartbeat registered (RadiusNas.nasname), but on a mobile network (CGNAT) the address
+ * changes, can differ between its HTTP and UDP traffic, and can land on an address an old router
+ * still holds — and then the router's requests were dropped or answered with the wrong secret,
+ * which customers see as "Already authorizing, retry later". A signature proves the sender, so:
+ * when the address is unknown, or its row's secret doesn't verify, find the router whose secret
+ * does and move its registration to this address.
+ */
+async function resolveNas(
+  sourceAddress: string,
+  verify: (secret: string) => boolean | null
+): Promise<{ secret: string; tenantId: string } | null> {
+  const byAddress = await getNas(sourceAddress);
+  // Verified, or nothing to prove the sender with (a RouterOS 6 Access-Request): trust the address.
+  if (byAddress && verify(byAddress.secret) !== false) return byAddress;
+
+  const candidates = await prisma.radiusNas.findMany({
+    where: { nasname: { not: sourceAddress } },
+    select: { id: true, secret: true, tenantId: true, routerId: true, nasname: true },
+    take: 2000,
+  });
+  const owner = candidates.find((c) => verify(c.secret) === true);
+  if (!owner) return null;
+
+  // This address now belongs to the router that signed. A row still holding it (an old router,
+  // or this router's previous address) gives way; the signer's row moves here.
+  await prisma.$transaction([
+    prisma.radiusNas.deleteMany({ where: { nasname: sourceAddress } }),
+    prisma.radiusNas.update({ where: { id: owner.id }, data: { nasname: sourceAddress } }),
+  ]);
+  console.log(`[radius] router ${owner.routerId ?? owner.id} now sends RADIUS from ${sourceAddress} (was ${owner.nasname}); registration moved`);
+  return { secret: owner.secret, tenantId: owner.tenantId };
+}
+
 async function checkCredentials(username: string, password: string): Promise<boolean> {
   const check = await prisma.radCheck.findFirst({
     where: { username, attribute: "Cleartext-Password" },
@@ -562,9 +619,9 @@ export function startRadiusServer(options: { authPort?: number; acctPort?: numbe
       const packet = parsePacket(msg);
       if (!packet || packet.code !== RADIUS_CODE.ACCESS_REQUEST) return;
 
-      const nas = await getNas(rinfo.address);
+      const nas = await resolveNas(rinfo.address, (secret) => verifyRequestMessageAuthenticator(msg, secret));
       if (!nas) {
-        console.warn(`[radius] Access-Request from unknown NAS ${rinfo.address} — no matching RadiusNas row`);
+        console.warn(`[radius] Access-Request from unknown NAS ${rinfo.address} — no matching RadiusNas row, and no router's secret signs it`);
         return;
       }
       const secret = nas.secret;
@@ -648,16 +705,14 @@ export function startRadiusServer(options: { authPort?: number; acctPort?: numbe
       const packet = parsePacket(msg);
       if (!packet || packet.code !== RADIUS_CODE.ACCOUNTING_REQUEST) return;
 
-      const nas = await getNas(rinfo.address);
+      // Accounting is always signed with the secret (RFC 2866), so the sender is proven even on
+      // RouterOS 6 — and an address change is picked up from it too.
+      const nas = await resolveNas(rinfo.address, (secret) => verifyAccountingRequest(msg, secret));
       if (!nas) {
-        console.warn(`[radius] Accounting-Request from unknown NAS ${rinfo.address} — no matching RadiusNas row`);
+        console.warn(`[radius] Accounting-Request from ${rinfo.address} that no router's secret signs — dropped`);
         return;
       }
       const secret = nas.secret;
-      if (!verifyAccountingRequest(msg, secret)) {
-        console.warn(`[radius] rejected unauthenticated Accounting-Request from ${rinfo.address}`);
-        return;
-      }
 
       const response = buildResponse(RADIUS_CODE.ACCOUNTING_RESPONSE, packet.identifier, packet.authenticator, secret, []);
       acctSocket.send(response, rinfo.port, rinfo.address);
