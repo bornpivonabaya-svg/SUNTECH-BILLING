@@ -18,13 +18,9 @@ import { ensureWinboxRelayPort } from "./winbox-relay.service.js";
 import { APP_FILTER_RULE_COUNT, APP_FILTER_TAG } from "./app-filter.js";
 import { rememberActiveDevices } from "./hotspot-device.service.js";
 import { listWalledGardenHostsFor } from "./walled-garden.js";
+import type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
 
-export interface RouterHeartbeatMetrics {
-  cpuLoadPercent?: number;
-  uptimeSeconds?: number;
-  memoryUsedBytes?: bigint;
-  memoryTotalBytes?: bigint;
-}
+export type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
 
 export const MANAGED_API_USERNAME = "mashupkgrid-api";
 
@@ -261,10 +257,11 @@ export async function completeRouterProvisioning(
     provisionedAt: router.provisionedAt ?? new Date(),
   };
 
-  if (metrics?.cpuLoadPercent !== undefined) updateData.cpuLoadPercent = metrics.cpuLoadPercent;
-  if (metrics?.uptimeSeconds !== undefined) updateData.uptimeSeconds = metrics.uptimeSeconds;
-  if (metrics?.memoryUsedBytes !== undefined) updateData.memoryUsedBytes = metrics.memoryUsedBytes;
-  if (metrics?.memoryTotalBytes !== undefined) updateData.memoryTotalBytes = metrics.memoryTotalBytes;
+  // Everything the router reported about itself; a field it didn't send keeps its last value.
+  for (const [key, value] of Object.entries(metrics ?? {})) {
+    if (value !== undefined) updateData[key] = value;
+  }
+  if (metrics?.routerOsVersion || metrics?.boardName) updateData.versionCheckedAt = new Date();
 
   // Always keyed to the WAN source address, in both the tunnel and no-tunnel paths below.
   try {
@@ -679,6 +676,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
             uptimeSeconds: router.uptimeSeconds ?? undefined,
             memoryUsedBytes: router.memoryUsedBytes ?? undefined,
             memoryTotalBytes: router.memoryTotalBytes ?? undefined,
+            temperatureC: router.temperatureC ?? undefined,
           };
         } else {
           health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
@@ -692,6 +690,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
             uptimeSeconds: router.uptimeSeconds ?? undefined,
             memoryUsedBytes: router.memoryUsedBytes ?? undefined,
             memoryTotalBytes: router.memoryTotalBytes ?? undefined,
+            temperatureC: router.temperatureC ?? undefined,
           };
         } else {
           health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
@@ -705,6 +704,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
         uptimeSeconds: router.uptimeSeconds ?? undefined,
         memoryUsedBytes: router.memoryUsedBytes ?? undefined,
         memoryTotalBytes: router.memoryTotalBytes ?? undefined,
+        temperatureC: router.temperatureC ?? undefined,
       };
     } else {
       health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
@@ -726,10 +726,18 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
       // ONLINE indefinitely. Confirmed live on a disconnected hAP.
       ...(health.reachable && !inferredFromHeartbeat ? { lastSeenAt: new Date() } : {}),
       lastError: health.error ?? null,
-      cpuLoadPercent: health.cpuLoadPercent ?? router.cpuLoadPercent ?? null,
-      memoryUsedBytes: health.memoryUsedBytes ?? router.memoryUsedBytes ?? null,
-      memoryTotalBytes: health.memoryTotalBytes ?? router.memoryTotalBytes ?? null,
-      uptimeSeconds: health.uptimeSeconds ?? router.uptimeSeconds ?? null,
+      // Figures only from a live read. An inferred result carries the values this poll read at
+      // its start, and connecting takes seconds to time out — writing them back would overwrite
+      // the report the router posted meanwhile, freezing its CPU/memory/temperature on screen.
+      ...(inferredFromHeartbeat || !health.reachable
+        ? {}
+        : {
+            cpuLoadPercent: health.cpuLoadPercent ?? router.cpuLoadPercent ?? null,
+            memoryUsedBytes: health.memoryUsedBytes ?? router.memoryUsedBytes ?? null,
+            memoryTotalBytes: health.memoryTotalBytes ?? router.memoryTotalBytes ?? null,
+            uptimeSeconds: health.uptimeSeconds ?? router.uptimeSeconds ?? null,
+            temperatureC: health.temperatureC ?? router.temperatureC ?? null,
+          }),
     },
   });
 

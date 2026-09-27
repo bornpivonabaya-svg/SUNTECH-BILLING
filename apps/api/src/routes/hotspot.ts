@@ -13,6 +13,8 @@ import { createTicket } from "@mashupkgrid/support";
 import {
   initiateHotspotPurchaseStkPush,
   queryAndReconcileStkRequest,
+  isStkRequestOpen,
+  STK_STILL_PROCESSING,
   initiatePaystackHotspotPurchase,
   verifyAndReconcilePaystackTransaction,
   initiatePesapalHotspotPurchase,
@@ -25,7 +27,11 @@ import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
 import { requirePermission } from "../plugins/authorize.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
-import { hotspotLoginRateLimitConfig } from "../plugins/rate-limit.js";
+import {
+  hotspotAccountLoginRateLimitConfig,
+  hotspotLoginRateLimitConfig,
+  hotspotPortalRateLimitConfig,
+} from "../plugins/rate-limit.js";
 import { resolveTenantBySlug } from "../services/auth.service.js";
 
 const tenantParamsSchema = z.object({ tenantSlug: z.string().min(1) });
@@ -229,7 +235,7 @@ const updateConfigSchema = z.object({
 export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/:tenantSlug/info",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug } = tenantParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -261,7 +267,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
 
   app.get(
     "/:tenantSlug/config",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug } = tenantParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -395,7 +401,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     "/:tenantSlug/payment-methods",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug } = tenantParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -491,7 +497,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     "/:tenantSlug/packages",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug } = tenantParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -626,7 +632,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     "/:tenantSlug/purchase/:checkoutRequestId/status",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug, checkoutRequestId } = statusParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -636,7 +642,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!req) throw new NotFoundError("Payment request");
 
-      if (req.status === "PENDING") {
+      if (isStkRequestOpen(req)) {
         try {
           const res = await queryAndReconcileStkRequest(tenant.id, checkoutRequestId);
           req = res.request;
@@ -664,7 +670,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     "/:tenantSlug/purchase/paystack/:reference/status",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug, reference } = paystackStatusParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -701,7 +707,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     "/:tenantSlug/purchase/pesapal/:reference/status",
-    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    { config: { audience: "customer", rateLimit: hotspotPortalRateLimitConfig }, preHandler: [checkMaintenance] },
     async (request, reply) => {
       const { tenantSlug, reference } = paystackStatusParamsSchema.parse(request.params);
       const tenant = await resolveTenantBySlug(tenantSlug);
@@ -1000,7 +1006,8 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
         const pendingStk = await prisma.mpesaStkRequest.findFirst({
           where: {
             tenantId: tenant.id,
-            status: "PENDING",
+            // Also a request an older version marked failed on "still under processing".
+            OR: [{ status: "PENDING" }, { status: "FAILED", resultCode: STK_STILL_PROCESSING }],
             phone,
             createdAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
           },
@@ -1134,7 +1141,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/:tenantSlug/account-login",
     {
-      config: { audience: "customer", rateLimit: hotspotLoginRateLimitConfig },
+      config: { audience: "customer", rateLimit: hotspotAccountLoginRateLimitConfig },
       preHandler: [checkMaintenance],
     },
     async (request, reply) => {

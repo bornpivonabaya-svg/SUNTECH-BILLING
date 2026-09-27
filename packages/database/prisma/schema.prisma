@@ -2029,6 +2029,13 @@ model Router {
   memoryUsedBytes      BigInt?
   memoryTotalBytes     BigInt?
   uptimeSeconds        Int?
+  /// From the router's own report (heartbeat) or a live API read; null where the board has no sensor.
+  temperatureC         Float?
+  voltageV             Float?
+  diskFreeBytes        BigInt?
+  diskTotalBytes       BigInt?
+  /// Hotspot users signed in on the router at its last report.
+  activeUsers          Int?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   deletedAt            DateTime?

@@ -72,7 +72,7 @@ export async function handleStkCallback(rawPayload: unknown): Promise<StkCallbac
   }
 
   const metadata = parseCallbackMetadata(stkCallback.CallbackMetadata?.Item);
-  const wasPending = existing.status === "PENDING";
+  const wasPending = isStkRequestOpen(existing);
 
   await completeStkRequest(existing.tenantId, checkoutRequestId, {
     resultCode: stkCallback.ResultCode,
@@ -82,6 +82,23 @@ export async function handleStkCallback(rawPayload: unknown): Promise<StkCallbac
   });
 
   return { handled: true, checkoutRequestId, duplicate: !wasPending, tenantId: existing.tenantId };
+}
+
+/** Daraja's STK status query answers ResultCode 4999, "The transaction is still under processing",
+ *  while the customer hasn't entered their PIN yet. That is "keep waiting", not a failure. */
+export const STK_STILL_PROCESSING = 4999;
+
+export function isStkStillProcessing(resultCode: number, resultDesc?: string | null): boolean {
+  return resultCode === STK_STILL_PROCESSING || /under processing|being processed/i.test(resultDesc ?? "");
+}
+
+/** Still waiting on the customer: PENDING, or failed only because an older version took
+ *  "still under processing" for a failure. Both may still be paid and must be resolved again. */
+export function isStkRequestOpen(request: Pick<MpesaStkRequest, "status" | "resultCode" | "resultDesc">): boolean {
+  return (
+    request.status === "PENDING" ||
+    (request.status === "FAILED" && request.resultCode !== null && isStkStillProcessing(request.resultCode, request.resultDesc))
+  );
 }
 
 export interface StkResultInput {
@@ -115,7 +132,15 @@ export async function completeStkRequest(
     // Idempotent: if already completed, check if this is the real Safaricom callback arriving
     // with the official MpesaReceiptNumber to upgrade a provisional receipt (PRV-...) issued
     // during STK query reconciliation.
-    if (request.status !== "PENDING") {
+    // Safaricom's own callback with a real receipt is proof the customer paid: it is honoured
+    // even on a request already marked failed or cancelled, or the money is taken and nothing
+    // is delivered.
+    const paidAfterAll =
+      request.status !== "COMPLETED" &&
+      result.resultCode === 0 &&
+      Boolean(result.metadata?.mpesaReceiptNumber) &&
+      !result.metadata?.mpesaReceiptNumber?.startsWith("PRV-");
+    if (!isStkRequestOpen(request) && !paidAfterAll) {
       if (
         request.status === "COMPLETED" &&
         result.resultCode === 0 &&

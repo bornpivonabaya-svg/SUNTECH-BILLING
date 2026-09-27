@@ -2,6 +2,7 @@ export * from "./adapter.interface.js";
 export * from "./stub.adapter.js";
 export * from "./factory.js";
 export * from "./router.service.js";
+export * from "./heartbeat-report.js";
 export * from "./wireguard-peer.service.js";
 export * from "./winbox-relay.service.js";
 export * from "./mikrotik/protocol.js";

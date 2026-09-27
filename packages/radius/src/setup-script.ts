@@ -440,9 +440,12 @@ ${walledGardenLines(walledGardenHosts)}
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
 :do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}; :if ([:len [/file find name=\\"hotspot/alogin.html\\"]] = 0) do={:do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
-# Persistent check-in. It survives normal reboots and is safe to re-run.
+# Persistent check-in, once a minute. It fetches the platform's small report script into memory
+# (never onto flash) and runs it: CPU, memory, disk, temperature, uptime, users — see
+# buildHeartbeatScript. If that fails for any reason, it still checks in plainly, so the router
+# never shows Offline because of the report. Survives reboots and is safe to re-run.
 :do {/system scheduler remove [find name=mkg-heartbeat]} on-error={}
-:do {/system scheduler add name=mkg-heartbeat interval=1m on-event=":do {/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no} on-error={}"} on-error={}
+:do {/system scheduler add name=mkg-heartbeat interval=1m on-event="${heartbeatOnEvent(callbackUrl)}"} on-error={}
 
 # Automated NTP Time Synchronization
 :do {/system clock set time-zone-autodetect=yes time-zone-name=Africa/Nairobi} on-error={}
@@ -471,6 +474,39 @@ ${osMajor === 6 ? "" : `${deferred(`/interface wifi set [find default-name=wifi1
 `;
 
   return isolateEveryCommand(wrapTopLevelCommands(minimalProvisioningScript));
+}
+
+/** The report script's address: next to the callback, same token. */
+export function heartbeatScriptUrl(callbackUrl: string): string {
+  return callbackUrl.replace(/\/callback$/, "/heartbeat.rsc");
+}
+
+/** The mkg-heartbeat scheduler's script, escaped to sit inside on-event="…" of the setup script. */
+function heartbeatOnEvent(callbackUrl: string): string {
+  const plain = `/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no`;
+  return (
+    `:do {:local r [/tool fetch url=\\"${heartbeatScriptUrl(callbackUrl)}\\" output=user as-value]; ` +
+    `:local f [:parse (\\$r->\\"data\\")]; \\$f} on-error={:do {${plain}} on-error={}}`
+  );
+}
+
+/**
+ * What mkg-heartbeat runs each minute, served fresh by the platform (so it improves without anyone
+ * re-running setup). Reads the router's own figures and posts them to the callback as a form
+ * body — parseHeartbeatReport in @mashupkgrid/network reads it. Written for RouterOS 6 and 7
+ * alike: /system health differs between them, so it is read through :parse and may fail alone,
+ * as may the hotspot user count on a router with no hotspot. Kept well under the 4 KB a v6
+ * `fetch output=user` returns.
+ */
+export function buildHeartbeatScript(callbackUrl: string): string {
+  const get = (field: string) => `[/system resource get ${field}]`;
+  return [
+    `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")})`,
+    `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={}`,
+    `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={}`,
+    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
+    "",
+  ].join("\n");
 }
 
 /** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */

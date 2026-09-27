@@ -68,6 +68,8 @@ vi.mock("@mashupkgrid/support", () => ({ createTicket: vi.fn() }));
 vi.mock("@mashupkgrid/payments", () => ({
   initiateHotspotPurchaseStkPush: vi.fn(),
   queryAndReconcileStkRequest: vi.fn(),
+  isStkRequestOpen: vi.fn((r: { status: string }) => r.status === "PENDING"),
+  STK_STILL_PROCESSING: 4999,
   initiatePaystackHotspotPurchase: vi.fn(),
   verifyAndReconcilePaystackTransaction: vi.fn(),
   initiatePesapalHotspotPurchase: vi.fn(),

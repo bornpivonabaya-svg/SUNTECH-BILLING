@@ -20,7 +20,12 @@ function requireTenant(tenantId: string | null): string {
 export async function routerHealthRoutes(app: FastifyInstance): Promise<void> {
   app.get("/", { config: { audience: "staff" }, preHandler: [...preHandler, requirePermission("routers.read")] }, async (request, reply) => {
     const tenantId = requireTenant(request.user!.tenantId);
-    const routers = await prisma.router.findMany({ where: { tenantId, deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, status: true, siteName: true } });
+    const routers = await prisma.router.findMany({ where: { tenantId, deletedAt: null }, orderBy: { name: "asc" }, select: {
+        id: true, name: true, status: true, siteName: true, lastSeenAt: true,
+        cpuLoadPercent: true, memoryUsedBytes: true, memoryTotalBytes: true, temperatureC: true, voltageV: true,
+        diskFreeBytes: true, diskTotalBytes: true, activeUsers: true, uptimeSeconds: true, routerOsVersion: true, boardName: true,
+      },
+    });
     const ids = routers.map((r) => r.id);
     const dayAgo = new Date(Date.now() - 86_400_000);
     const weekAgo = new Date(Date.now() - 7 * 86_400_000);
@@ -42,8 +47,26 @@ export async function routerHealthRoutes(app: FastifyInstance): Promise<void> {
         routers.map((r) => {
           const l = latest.find((x) => x.routerId === r.id);
           const a = availability.find((x) => x.routerId === r.id);
+          const { cpuLoadPercent, memoryUsedBytes, memoryTotalBytes, temperatureC, voltageV, diskFreeBytes, diskTotalBytes, activeUsers, uptimeSeconds, routerOsVersion, boardName, lastSeenAt, ...base } = r;
           return {
-            ...r,
+            ...base,
+            // What the router last reported about itself (every minute, from its heartbeat or a
+            // live read) — fresher than the 5-minute samples the history is built from.
+            live: {
+              at: lastSeenAt,
+              cpuPercent: cpuLoadPercent,
+              memoryUsedBytes: memoryUsedBytes === null ? null : Number(memoryUsedBytes),
+              memoryTotalBytes: memoryTotalBytes === null ? null : Number(memoryTotalBytes),
+              memoryPercent: memoryUsedBytes !== null && memoryTotalBytes ? Math.round(Number((memoryUsedBytes * 100n) / memoryTotalBytes)) : null,
+              temperatureC,
+              voltageV,
+              diskFreeBytes: diskFreeBytes === null ? null : Number(diskFreeBytes),
+              diskTotalBytes: diskTotalBytes === null ? null : Number(diskTotalBytes),
+              activeUsers,
+              uptimeSeconds,
+              routerOsVersion,
+              boardName,
+            },
             latest: l ? { at: l.at, cpuPercent: l.cpuPercent, memoryPercent: l.memoryPercent, temperatureC: l.temperatureC, uptimeSeconds: l.uptimeSeconds } : null,
             availability24h: a && Number(a.total) > 0 ? Math.round((Number(a.up) / Number(a.total)) * 1000) / 10 : null,
             reboots7d: Number(reboots.find((x) => x.routerId === r.id)?.reboots ?? 0),

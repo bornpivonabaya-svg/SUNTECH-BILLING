@@ -4,7 +4,7 @@ import { getMpesaCredentials, type MpesaCredentials } from "./config.service.js"
 import { getPlatformMpesaCredentials } from "./platform-config.service.js";
 import { initiateStkPush, queryStkPushStatus } from "./daraja-client.js";
 import { normalizeKenyanPhone } from "./phone.js";
-import { completeStkRequest } from "./callback.service.js";
+import { completeStkRequest, isStkRequestOpen, isStkStillProcessing } from "./callback.service.js";
 import { buildMpesaCallbackUrl } from "./callback-url.js";
 import { getSettlementSettings } from "../gateway/settings.service.js";
 import { getOrCreateCustomerReference, getOrCreateInvoiceReference } from "../gateway/payment-reference.service.js";
@@ -212,7 +212,7 @@ export async function queryAndReconcileStkRequest(
   checkoutRequestId: string
 ): Promise<{ request: MpesaStkRequest; unresolvedSuccess: boolean }> {
   const request = await getStkRequestOrThrow(tenantId, checkoutRequestId);
-  if (request.status !== "PENDING") return { request, unresolvedSuccess: false };
+  if (!isStkRequestOpen(request)) return { request, unresolvedSuccess: false };
 
   // Same account that pushed it — recorded on the request, not re-derived from the tenant's current
   // mode: a status query signed by a different shortcode cannot find it.
@@ -221,7 +221,10 @@ export async function queryAndReconcileStkRequest(
   const result = await queryStkPushStatus(credentials, checkoutRequestId);
   const resultCode = Number(result.ResultCode);
 
-  if (Number.isNaN(resultCode)) return { request, unresolvedSuccess: false }; // still pending
+  // Still pending: no code yet, or Safaricom's "still under processing" (the PIN prompt is open).
+  if (Number.isNaN(resultCode) || isStkStillProcessing(resultCode, result.ResultDesc)) {
+    return { request, unresolvedSuccess: false };
+  }
 
   if (resultCode === 0) {
     const provisionalReceipt = `PRV-${checkoutRequestId.replace(/[^A-Za-z0-9]/g, "").slice(-12).toUpperCase()}`;

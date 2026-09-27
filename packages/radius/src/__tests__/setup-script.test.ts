@@ -3,6 +3,7 @@ import type { Router } from "@mashupkgrid/database";
 import {
   buildMikrotikProvisioningScript as buildRawScript,
   buildMikrotikWinboxScript,
+  buildHeartbeatScript,
   deferred,
   managementSources,
   plainCommands,
@@ -233,5 +234,28 @@ describe("deferred commands", () => {
     expect(deferred('/tool fetch url="https://x/y" http-data=$key\n:delay 2s')).toBe(
       ':do {:local mkgCmd [:parse "/tool fetch url=\\"https://x/y\\" http-data=\\$key; :delay 2s"]; $mkgCmd} on-error={}'
     );
+  });
+});
+
+describe("router health report", () => {
+  it("checks in each minute by running the platform's report script in memory, falling back to a plain check-in", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, {});
+    const line = script.split("\n").find((l) => l.includes("name=mkg-heartbeat interval=1m"))!;
+    const reportUrl = callbackUrl.replace(/\/callback$/, "/heartbeat.rsc");
+    expect(line).toContain(`/tool fetch url=\\"${reportUrl}\\" output=user as-value`);
+    expect(line).toContain(':local f [:parse (\\$r->\\"data\\")]; \\$f}');
+    expect(line).toContain(`on-error={:do {/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no} on-error={}}`);
+    expect(line).not.toContain("dst-path"); // nothing written to flash every minute
+  });
+
+  it("reports CPU, memory, storage, uptime, version, board, users and sensors, and fits a v6 fetch", () => {
+    const report = buildHeartbeatScript(callbackUrl);
+    for (const field of ["cpu-load", "uptime", "free-memory", "total-memory", "free-hdd-space", "total-hdd-space", "version", "board-name"]) {
+      expect(report).toContain(`[/system resource get ${field}]`);
+    }
+    expect(report).toContain("[:len [/ip hotspot active find]]");
+    expect(report).toContain('[:parse ":return [:tostr [/system health print as-value]]"]');
+    expect(report).toContain(`/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`);
+    expect(report.length).toBeLessThan(4000);
   });
 });
