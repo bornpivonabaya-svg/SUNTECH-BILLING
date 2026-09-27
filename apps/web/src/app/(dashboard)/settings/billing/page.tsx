@@ -37,10 +37,16 @@ interface SubscriptionPayment {
   createdAt: string;
 }
 
+interface PlanOption extends TenantPlanSummary {
+  description: string | null;
+}
+
 interface BillingResponse {
-  subscription: Subscription;
+  /** Null until the ISP picks a plan (a new account on its free trial). */
+  subscription: Subscription | null;
   usage: { customers: UsageLimit; routers: UsageLimit };
   payments: SubscriptionPayment[];
+  plans: PlanOption[];
 }
 
 const STATUS_META: Record<Subscription["status"], { label: string; variant: "success" | "warning" | "danger" | "info" | "neutral" }> = {
@@ -50,6 +56,8 @@ const STATUS_META: Record<Subscription["status"], { label: string; variant: "suc
   EXPIRED: { label: "Expired", variant: "danger" },
   CANCELLED: { label: "Cancelled", variant: "neutral" },
 };
+
+const latestPaymentPending = (payments: SubscriptionPayment[]) => payments[0]?.status === "PENDING";
 
 function formatMinor(amountMinor: number): string {
   return `KES ${(amountMinor / 100).toLocaleString()}`;
@@ -75,10 +83,70 @@ function UsageBar({ label, usage }: { label: string; usage: UsageLimit }) {
   );
 }
 
+/** Plan cards with a monthly / yearly switch. Picking one saves it; paying is the step after. */
+function PlanPicker({ plans, currentPlanId, onChosen }: { plans: PlanOption[]; currentPlanId?: string; onChosen: () => void }) {
+  const [cycle, setCycle] = useState<"MONTHLY" | "ANNUAL">("MONTHLY");
+  const [error, setError] = useState<string | null>(null);
+  const choose = useMutation({
+    mutationFn: (planId: string) => apiFetch("/api/v1/billing/choose-plan", { method: "POST", body: JSON.stringify({ planId, billingCycle: cycle }) }),
+    onSuccess: onChosen,
+    onError: (err) => setError(err instanceof ApiRequestError ? err.message : tr("Something went wrong.")),
+  });
+  if (plans.length === 0) {
+    return <p className="text-sm text-slate-500">{tr("No plans are available yet. Contact support to get set up.")}</p>;
+  }
+  const hasAnnual = plans.some((p) => p.annualPriceMinor !== null);
+  return (
+    <div className="space-y-3">
+      {hasAnnual && (
+        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-xs dark:border-obsidian-700" role="group" aria-label={tr("Billing period")}>
+          {(["MONTHLY", "ANNUAL"] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={cycle === c}
+              onClick={() => setCycle(c)}
+              className={`rounded-md px-3 py-1 font-medium ${cycle === c ? "bg-slate-900 text-white dark:bg-obsidian-700" : "text-slate-500"}`}
+            >
+              {c === "MONTHLY" ? tr("Monthly") : tr("Yearly")}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {plans.map((plan) => {
+          const price = cycle === "ANNUAL" ? plan.annualPriceMinor ?? plan.monthlyPriceMinor * 12 : plan.monthlyPriceMinor;
+          return (
+            <Card key={plan.id} className={`space-y-2 ${plan.id === currentPlanId ? "border-brand-500" : ""}`}>
+              <p className="font-semibold text-slate-900 dark:text-white">{plan.name}</p>
+              {plan.description && <p className="text-xs text-slate-500">{plan.description}</p>}
+              <p className="text-lg font-bold text-slate-900 dark:text-white">
+                {formatMinor(price)} <span className="text-xs font-normal text-slate-500">/ {cycle === "ANNUAL" ? tr("year") : tr("month")}</span>
+              </p>
+              <p className="text-xs text-slate-500">
+                {tr("Customers")}: {plan.maxCustomers ?? tr("Unlimited")} · {tr("Routers")}: {plan.maxRouters ?? tr("Unlimited")}
+              </p>
+              <Button className="w-full" disabled={choose.isPending} onClick={() => { setError(null); choose.mutate(plan.id); }}>
+                {plan.id === currentPlanId ? tr("Keep this plan") : tr("Choose this plan")}
+              </Button>
+            </Card>
+          );
+        })}
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
+    </div>
+  );
+}
+
 export default function BillingPage() {
   const queryClient = useQueryClient();
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [changingPlan, setChangingPlan] = useState(false);
+  const refresh = () => {
+    setChangingPlan(false);
+    void queryClient.invalidateQueries({ queryKey: ["billing"] });
+  };
 
   const { data, isLoading, error: loadError } = useQuery({
     queryKey: ["billing"],
@@ -97,16 +165,36 @@ export default function BillingPage() {
     return <p className="text-sm text-slate-500">{tr("Loading subscription...")}</p>;
   }
   if (!data) {
-    // A 404 here means the account simply has no plan yet, which is not an error to the reader.
-    const noPlan = loadError instanceof ApiRequestError && loadError.status === 404;
     return (
       <p className="text-sm text-slate-400">
-        {noPlan ? "No plan is set up for this account yet." : `Couldn't load your subscription: ${loadError instanceof Error ? loadError.message : "please try again."}`}
+        {tr("Couldn't load your subscription:")} {loadError instanceof Error ? loadError.message : tr("please try again.")}
       </p>
     );
   }
 
-  const { subscription, usage, payments } = data;
+  const { subscription, usage, payments, plans } = data;
+  if (!subscription || changingPlan) {
+    return (
+      <div className="max-w-2xl space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+            <IconLayers size={18} className="text-brand-600 dark:text-brand-400" />
+            {subscription ? tr("Change plan") : tr("Choose your plan")}
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {tr("Pick a plan, then pay for it with M-Pesa on the next step. Your account unlocks as soon as the payment goes through.")}
+          </p>
+        </div>
+        <PlanPicker plans={plans} currentPlanId={subscription?.plan.id} onChosen={refresh} />
+        {subscription && (
+          <Button variant="secondary" onClick={() => setChangingPlan(false)}>
+            {tr("Cancel")}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   const meta = STATUS_META[subscription.status];
   const price =
     subscription.billingCycle === "ANNUAL"
@@ -133,6 +221,11 @@ export default function BillingPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{tr("Current Plan")}</p>
             <p className="text-lg font-bold text-slate-900 dark:text-white">{subscription.plan.name}</p>
+            {subscription.status !== "ACTIVE" && latestPaymentPending(payments) === false && (
+              <button type="button" className="mt-1 text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400" onClick={() => setChangingPlan(true)}>
+                {tr("Change plan")}
+              </button>
+            )}
           </div>
           <Badge variant={meta.variant}>
             <StatusDot status={meta.variant === "success" ? "ONLINE" : meta.variant === "danger" ? "DOWN" : "UNKNOWN"} />
@@ -148,10 +241,10 @@ export default function BillingPage() {
           </div>
           <div>
             <p className="text-slate-400 text-xs">
-              {subscription.status === "TRIALING" ? "Trial ends" : "Renews / due"}
+              {subscription.status === "TRIALING" ? tr("Trial ends") : subscription.status === "EXPIRED" ? tr("Status") : tr("Renews / due")}
             </p>
             <p className="font-medium text-slate-800 dark:text-slate-200">
-              {periodEnd.toLocaleDateString()} ({daysLeft >= 0 ? `${daysLeft} days left` : "overdue"})
+              {subscription.status === "EXPIRED" ? tr("Not paid yet — pay below to unlock your account") : `${periodEnd.toLocaleDateString()} (${daysLeft >= 0 ? `${daysLeft} ${tr("days left")}` : tr("overdue")})`}
             </p>
           </div>
         </div>
@@ -162,7 +255,7 @@ export default function BillingPage() {
       </Card>
 
       <Card className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{tr("Renew Now")}</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{subscription.status === "EXPIRED" ? tr("Pay now") : tr("Renew Now")}</p>
         <div>
           <Label htmlFor="phone">{tr("M-Pesa Phone Number")}</Label>
           <Input
@@ -181,7 +274,7 @@ export default function BillingPage() {
             renew.mutate();
           }}
         >
-          {latestPayment?.status === "PENDING" ? "Waiting for payment..." : renew.isPending ? "Starting..." : "Renew Now"}
+          {latestPayment?.status === "PENDING" ? tr("Waiting for payment...") : renew.isPending ? tr("Starting...") : subscription.status === "EXPIRED" ? tr("Pay with M-Pesa") : tr("Renew Now")}
         </Button>
         {error && <ErrorText>{error}</ErrorText>}
       </Card>
