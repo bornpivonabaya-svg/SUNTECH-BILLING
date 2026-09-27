@@ -237,20 +237,51 @@ async function syncRadiusNasRegistration(router: Router, sourceAddress: string):
   });
 }
 
+/** The router a setup/heartbeat token belongs to: its current token, or the previous one it
+ *  still runs with until a freshly issued setup command has been run (see issueSetupCommand). */
+export async function findRouterByProvisionToken(provisionToken: string): Promise<Router | null> {
+  const hash = hashToken(provisionToken);
+  return prisma.router.findFirst({
+    where: { deletedAt: null, OR: [{ provisionTokenHash: hash }, { previousProvisionTokenHash: hash }] },
+  });
+}
+
+/**
+ * A new setup command for a router that already exists: the dashboard only keeps the token's
+ * hash, so the original command can't be shown again. The token the router runs with now stays
+ * valid (previousProvisionTokenHash) until the router first checks in with the new one, so it
+ * never drops Offline in between — and asking twice before running either keeps the router's
+ * working token, replacing only the unused new one.
+ */
+export async function issueSetupCommand(tenantId: string, routerId: string): Promise<string> {
+  const router = await getRouterOrThrow(tenantId, routerId);
+  const provisionToken = generateSecureToken(24);
+  await prisma.router.update({
+    where: { id: router.id },
+    data: {
+      provisionTokenHash: hashToken(provisionToken),
+      previousProvisionTokenHash: router.previousProvisionTokenHash ?? router.provisionTokenHash,
+    },
+  });
+  return provisionToken;
+}
+
 export async function completeRouterProvisioning(
   provisionToken: string,
   remoteHost: string,
   wgPublicKey?: string,
   metrics?: RouterHeartbeatMetrics
 ): Promise<Router> {
-  const router = await prisma.router.findFirst({
-    where: { provisionTokenHash: hashToken(provisionToken), deletedAt: null },
-  });
+  const router = await findRouterByProvisionToken(provisionToken);
   if (!router) throw new NotFoundError("Provisioning token");
 
   const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : "";
 
   const updateData: Record<string, unknown> = {
+    // The router checked in with its new token: the old one has done its job.
+    ...(router.previousProvisionTokenHash && router.provisionTokenHash === hashToken(provisionToken)
+      ? { previousProvisionTokenHash: null }
+      : {}),
     status: "ONLINE",
     lastSeenAt: new Date(),
     lastError: null,

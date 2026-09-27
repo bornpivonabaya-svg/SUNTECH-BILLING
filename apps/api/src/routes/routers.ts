@@ -8,6 +8,8 @@ import {
   createPendingRouter,
   getGeneratedCredentials,
   completeRouterProvisioning,
+  findRouterByProvisionToken,
+  issueSetupCommand,
   isHeartbeatReport,
   parseHeartbeatReport,
   ensureRouterVpnIp,
@@ -44,7 +46,7 @@ import {
   buildMikrotikWinboxScript,
   buildSocialFirewallOnlyScript,
 } from "@mashupkgrid/radius";
-import { successResponse, ConflictError, NotFoundError, hashToken } from "@mashupkgrid/shared";
+import { successResponse, ConflictError, NotFoundError } from "@mashupkgrid/shared";
 import { env, isProduction } from "@mashupkgrid/config";
 import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
@@ -192,7 +194,7 @@ function computeLiveRouterStatus(
 }
 
 function toRouterSummary(router: RouterRow) {
-  const { usernameEncrypted: _u, passwordEncrypted: _p, provisionTokenHash: _t, ...summary } = router;
+  const { usernameEncrypted: _u, passwordEncrypted: _p, provisionTokenHash: _t, previousProvisionTokenHash: _pt, vpnRegisterTokenHash: _vt, ...summary } = router;
   const effectiveStatus = computeLiveRouterStatus(summary.status, summary.lastSeenAt);
 
   // Auto-sync database row if a router has silently died / been powered off
@@ -238,6 +240,15 @@ export function parseAccessPointReport(raw: string): ConnectedAccessPoint[] {
     });
   }
   return aps;
+}
+
+/** The one line an ISP pastes into the router's terminal. It checks in as soon as the download
+ *  works, so a router that reached us always shows up on the dashboard, whatever happens in the
+ *  setup after it. The import runs as a background job (:execute) — see the provisioning-script
+ *  route — with its output in mkg-setup.txt on the router. */
+function setupFetchCommand(provisionToken: string): string {
+  const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
+  return `/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in MashupHost within a minute."`;
 }
 
 export async function routerRoutes(app: FastifyInstance): Promise<void> {
@@ -409,11 +420,31 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
       // reconfigures Wi-Fi, the bridge and management access, which drops a WinBox session made
       // through them — and an /import run inside that session dies with it, half-applied. Its
       // output goes to mkg-setup.txt on the router for troubleshooting.
-      // It checks in as soon as the download works, so a router that reached us always shows up
-      // on the dashboard, whatever happens in the setup after it.
-      const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
-      const fetchCommand = `/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in MashupHost within a minute."`;
+      const fetchCommand = setupFetchCommand(provisionToken);
       reply.send(successResponse({ script, fetchCommand, oneLiner: fetchCommand }, request.id));
+    }
+  );
+
+  /** A fresh setup command for a router that already exists — to re-run setup after an update,
+   *  or on a router reset to factory settings. The original can't be shown again (only its hash is
+   *  kept); the router's current token keeps working until it runs the new one. */
+  app.post(
+    "/:routerId/setup-command",
+    { config: { audience: "staff" }, preHandler: [...preHandler, requirePermission("routers.manage")] },
+    async (request, reply) => {
+      const tenantId = requireTenant(request.user!.tenantId);
+      const { routerId } = idParamsSchema.parse(request.params);
+      const provisionToken = await issueSetupCommand(tenantId, routerId);
+      await writeAuditLog({
+        tenantId,
+        actorUserId: request.user!.id,
+        action: "router.setup_command_issued",
+        resourceType: "Router",
+        resourceId: routerId,
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+      reply.send(successResponse({ fetchCommand: setupFetchCommand(provisionToken) }, request.id));
     }
   );
 
@@ -660,7 +691,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
   // secret its heartbeat proves, so a caller can only ever write its own router's list.
   app.all("/provision/:token/push-aps", { config: { audience: "system-critical" } }, async (request, reply) => {
     const { token } = request.params as { token: string };
-    const router = await prisma.router.findFirst({ where: { provisionTokenHash: hashToken(token), deletedAt: null } });
+    const router = await findRouterByProvisionToken(token);
     if (!router) throw new NotFoundError("Router");
 
     const query = (request.query as Record<string, string>) || {};
@@ -902,10 +933,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
    */
   app.get("/provision/:token/setup.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const { token } = provisionCallbackParamsSchema.parse(request.params);
-    const router = await prisma.router.findFirst({
-      where: { provisionTokenHash: hashToken(token), deletedAt: null },
-      include: { tenant: true },
-    });
+    const found = await findRouterByProvisionToken(token);
+    const router = found ? await prisma.router.findUnique({ where: { id: found.id }, include: { tenant: true } }) : null;
     if (!router) {
       reply.status(404).header("Content-Type", "text/plain").send("# Error: Invalid or expired provisioning token\n");
       return;
@@ -979,10 +1008,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
    *  setup. The token is the auth, as for setup.rsc. */
   app.get("/provision/:token/heartbeat.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const { token } = provisionCallbackParamsSchema.parse(request.params);
-    const router = await prisma.router.findFirst({
-      where: { provisionTokenHash: hashToken(token), deletedAt: null },
-      select: { id: true },
-    });
+    const router = await findRouterByProvisionToken(token);
     if (!router) {
       reply.status(404).header("Content-Type", "text/plain").send("# Unknown provisioning token\n");
       return;

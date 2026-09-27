@@ -152,7 +152,7 @@ function HealthStrip({ router }: { router: RouterRow }) {
     // Online but no figures: the router checks in with the older script, which sends none.
     return router.status === "ONLINE" ? (
       <p className="mt-2 text-xs text-slate-400">
-        {tr("No health readings yet. Run the router's setup command once more to turn on CPU, memory, temperature and uptime reports.")}
+        {tr("No health readings yet: this router runs an older setup. Get its setup command below and run it once more to turn on CPU, memory, temperature and uptime reports.")}
       </p>
     ) : null;
   }
@@ -173,6 +173,46 @@ function HealthStrip({ router }: { router: RouterRow }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A fresh setup command for this router, on request: to re-run setup after an update or on a
+ *  router reset to factory settings. The router keeps working on its current one until then. */
+function SetupCommand({ routerId }: { routerId: string }) {
+  const [command, setCommand] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const issue = useMutation({
+    mutationFn: () => apiFetch<{ fetchCommand: string }>(`/api/v1/routers/${routerId}/setup-command`, { method: "POST" }),
+    onSuccess: (data) => setCommand(data.fetchCommand),
+  });
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="mt-2 text-xs font-medium text-brand-400 hover:text-brand-300 hover:underline"
+        onClick={() => {
+          setOpen(true);
+          if (!command) issue.mutate();
+        }}
+      >
+        {tr("Get setup command")}
+      </button>
+    );
+  }
+  return (
+    <div className="mt-3 max-w-2xl space-y-2">
+      <p className="text-xs text-slate-400">
+        {tr("Paste this into WinBox → New Terminal on this router. It keeps its settings and customers, and stays online while it updates.")}
+      </p>
+      {issue.isError ? (
+        <p className="text-xs text-red-300">{issue.error instanceof Error ? issue.error.message : String(issue.error)}</p>
+      ) : (
+        <CodeBlock code={command} label={tr("Setup command")} maxHeight="8rem" />
+      )}
+      <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => setOpen(false)}>
+        {tr("Hide")}
+      </button>
+    </div>
   );
 }
 
@@ -517,6 +557,7 @@ export default function RoutersPage() {
                         .join(" · ")}
                     </p>
                     <HealthStrip router={router} />
+                    {router.host && <SetupCommand routerId={router.id} />}
                   </div>
                 </div>
 

@@ -1990,6 +1990,10 @@ model Router {
   /// is how `host` above gets populated without an admin ever typing an IP. Null for routers
   /// linked the old manual-entry way (host/credentials filled in directly).
   provisionTokenHash   String?               @unique
+  /// The token the router still runs with after an ISP asked for a fresh setup command (the
+  /// dashboard can't show the old one again, only its hash is kept). Accepted until the router
+  /// first checks in with the new token, so it never drops Offline in between.
+  previousProvisionTokenHash String?         @unique
   provisionedAt        DateTime?
   /// WireGuard remote access — lets the platform reach this router's API even when it has no
   /// public IP / is behind NAT (the common case for a real customer-premises router), instead
