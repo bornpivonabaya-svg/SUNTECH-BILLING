@@ -432,7 +432,8 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ppp aaa set use-radius=yes accounting=yes interim-update=1m} on-error={}
 # login-by=mac first: a phone that has paid is logged straight back in by the RADIUS server
 # (findMacLogin) when it reconnects, without seeing the sign-in page at all.
-:do {/ip hotspot profile set [find default=yes] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
+:do {/ip hotspot profile set [find] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
+:do {/ip hotspot set [find interface=bridge] profile=default disabled=no} on-error={}
 :do {/ip hotspot reset-html} on-error={}
 :do {/ip hotspot user profile set [find default=yes] shared-users=1} on-error={}
 :do {/ip hotspot remove [find name=mkg-hotspot]} on-error={}
@@ -520,6 +521,11 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     `:do {/interface bridge port add bridge=bridge interface=wifi1} on-error={};`,
     `:do {/interface wireless set [find name=wlan1] disabled=no mode=ap-bridge} on-error={};`,
     `:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap} on-error={};`,
+    `:do {/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8} on-error={};`,
+    `:do {/ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"} on-error={};`,
+    `:do {/ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"} on-error={};`,
+    `:do {/ip hotspot profile set [find] html-directory=hotspot use-radius=yes login-by=mac,http-chap,http-pap,cookie} on-error={};`,
+    `:do {/ip hotspot set [find interface=bridge] profile=default disabled=no} on-error={};`,
     portalSelfRepair,
     `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")});`,
     `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={};`,
