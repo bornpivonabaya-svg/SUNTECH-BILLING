@@ -470,7 +470,7 @@ ${osMajor === 6 ? "" : `${deferred(`/interface wifi set [find default-name=wifi1
 :put "========================================================="
 `;
 
-  return wrapTopLevelCommands(minimalProvisioningScript);
+  return isolateEveryCommand(wrapTopLevelCommands(minimalProvisioningScript));
 }
 
 /** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */
@@ -514,6 +514,32 @@ export function buildNtpLines(osMajor: 6 | 7 | null): string {
 export function deferred(commands: string): string {
   const source = commands.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/\n/g, "; ");
   return `:do {:local mkgCmd [:parse "${source}"]; $mkgCmd} on-error={}`;
+}
+
+/** The setup script goes through `/import`, which checks the whole file before running any of it.
+ *  `on-error` only catches failures while running, so one command or parameter a router doesn't
+ *  know — a v7-only DNS option on v6, a menu from a package it lacks — would still reject the
+ *  entire file, check-in included. Every single-line command is therefore handed to `:parse`
+ *  (see deferred()): the file is always accepted, and an unknown command only skips itself. */
+export function isolateEveryCommand(script: string): string {
+  return script
+    .split("\n")
+    .map((line) => {
+      const inner = /^:do \{(\/.*)\} on-error=\{\}$/.exec(line)?.[1];
+      return inner ? deferred(inner) : line;
+    })
+    .join("\n");
+}
+
+/** Reverses deferred() on each line so the script reads as the plain commands it runs. */
+export function plainCommands(script: string): string {
+  return script
+    .split("\n")
+    .map((line) => {
+      const source = /^:do \{:local mkgCmd \[:parse "(.*)"\]; \$mkgCmd\} on-error=\{\}$/.exec(line)?.[1];
+      return source === undefined ? line : `:do {${source.replace(/\\(.)/g, "$1")}} on-error={}`;
+    })
+    .join("\n");
 }
 
 /** /import stops at the first command RouterOS rejects, and everything after it silently never
