@@ -53,6 +53,8 @@ describe("per-app filter self-repair", () => {
         if (words[0] === "/ip/firewall/filter/print") return Array.from({ length: installedRules }, (_, i) => ({ ".id": `*${i}` }));
         if (words[0] === "/file/print") return [{ name: "hotspot/login.html" }];
         if (words[0] === "/radius/print") return [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }];
+        if (words[0] === "/ip/firewall/mangle/print")
+          return ["63", "127", "254"].map((t, i) => ({ ".id": `*M${i}`, comment: "MASHUPKGRID ANTI-TETHER", "src-address-list": "mashup-anti-tether", ttl: `equal:${t}` }));
         return [];
       }),
       talk: vi.fn(async (words: string[]) => {

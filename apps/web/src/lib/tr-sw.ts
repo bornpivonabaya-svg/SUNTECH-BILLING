@@ -1048,4 +1048,6 @@ export const SW: Record<string, string> = {
   "Waiting for payment...": "Inasubiri malipo...",
   "Starting...": "Inaanza...",
   "Pay with M-Pesa": "Lipa kwa M-Pesa",
+  "Blocks sharing a paid connection through a phone hotspot. The paying phone is never blocked.": "Inazuia kushiriki muunganisho uliolipiwa kupitia hotspot ya simu. Simu iliyolipa haizuiliwi kamwe.",
+  "Block hotspot sharing": "Zuia kushiriki hotspot",
 };

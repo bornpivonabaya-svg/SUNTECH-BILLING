@@ -134,27 +134,34 @@ function hostWithSubdomains(host: string): string[] {
  *  So it raises the cost of casual sharing — which is nearly all of it — rather than stopping a
  *  determined person. That is why it is opt-in per router: an operator turns it on where sharing
  *  is actually costing them, and leaves it off where a wrongly-blocked customer is worse. */
-function buildAntiTetheringSection(enabled: boolean): string {
-  if (!enabled) {
-    return `# 10. Anti-tethering: Package-level enforcement active via RADIUS address list.
-/ip firewall filter remove [find comment="MASHUPKGRID ANTI-TETHER"]
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:63 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:127 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:254 action=drop comment="MASHUPKGRID ANTI-TETHER"
-:do {/ip firewall filter move [find comment="MASHUPKGRID ANTI-TETHER"] destination=0} on-error={}
-:put "Per-package Anti-tethering filter active"`;
-  }
+export const ANTI_TETHER_COMMENT = "MASHUPKGRID ANTI-TETHER";
 
-  return `# 10. Anti-tethering: Global router + package enforcement active.
-/ip firewall filter remove [find comment="MASHUPKGRID ANTI-TETHER"]
-/ip firewall filter add chain=forward hotspot=auth ttl=equal:63 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward hotspot=auth ttl=equal:127 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward hotspot=auth ttl=equal:254 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:63 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:127 action=drop comment="MASHUPKGRID ANTI-TETHER"
-/ip firewall filter add chain=forward src-address-list="mashup-anti-tether" ttl=equal:254 action=drop comment="MASHUPKGRID ANTI-TETHER"
-:do {/ip firewall filter move [find comment="MASHUPKGRID ANTI-TETHER"] destination=0} on-error={}
-:put "Anti-tethering active — one device per voucher enforced at the network level"`;
+function buildAntiTetheringSection(enabled: boolean): string {
+  return antiTetheringRules(enabled).join("\n");
+}
+
+/**
+ * The rules, in the mangle table's prerouting chain. Prerouting sees a packet's TTL exactly as the
+ * customer's device sent it (64 from their phone, 63 from a device sharing through it); the filter
+ * table's forward chain sees it after the router has already taken one off, so matching 63 there
+ * dropped every phone's own traffic — customers were "logged in" with nothing loading. Here a
+ * shared packet's TTL is set to 1, so the router discards it instead of forwarding it, and the
+ * paying device is never touched.
+ *
+ * Also clears the old forward-chain rules, from routers set up before this changed.
+ */
+export function antiTetheringRules(globalOn: boolean): string[] {
+  const rule = (match: string, ttl: number) =>
+    `/ip firewall mangle add chain=prerouting ${match} ttl=equal:${ttl} action=change-ttl new-ttl=set:1 passthrough=no comment="${ANTI_TETHER_COMMENT}"`;
+  const ttls = [63, 127, 254];
+  return [
+    `# 10. Anti-tethering: ${globalOn ? "every signed-in hotspot device, plus packages that ask for it" : "only packages that ask for it (via their RADIUS address list)"}.`,
+    `/ip firewall filter remove [find comment="${ANTI_TETHER_COMMENT}"]`,
+    `/ip firewall mangle remove [find comment="${ANTI_TETHER_COMMENT}"]`,
+    ...(globalOn ? ttls.map((t) => rule("hotspot=auth", t)) : []),
+    ...ttls.map((t) => rule(`src-address-list="mashup-anti-tether"`, t)),
+    `:put "Anti-tethering rules in place (shared connections blocked, the paying device untouched)"`,
+  ];
 }
 
 /** Standalone script to install or refresh the per-app package filter on an existing router. */
@@ -292,20 +299,16 @@ export function buildMikrotikProvisioningScript(
     ? `
 # Optional management VPN (RouterOS v7+). This is deliberately last: a legacy or low-resource
 # hAP must still finish hotspot provisioning even when WireGuard is unavailable.
-:if ([:pick [/system resource get version] 0 2] = "7.") do={
-  :do {
-  /interface wireguard remove [find name=mkg-wg]
-  /interface wireguard add name=mkg-wg listen-port=${serverPort}
-  :delay 2s
-  /ip address remove [find interface=mkg-wg]
-  /ip address add address=${vpnIp}/32 interface=mkg-wg
-  :local routerPublicKey [/interface wireguard get [find name=mkg-wg] public-key]
-  /tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no
-  :delay 2s
-  /interface wireguard peers remove [find interface=mkg-wg]
-  /interface wireguard peers add interface=mkg-wg public-key="${serverPublicKey}" endpoint-address="${serverHost}" endpoint-port=${serverPort} allowed-address=${vpnSubnet} persistent-keepalive=25s
-  } on-error={}
-}
+${deferred(`/interface wireguard remove [find name=mkg-wg]
+/interface wireguard add name=mkg-wg listen-port=${serverPort}
+:delay 2s
+/ip address remove [find interface=mkg-wg]
+/ip address add address=${vpnIp}/32 interface=mkg-wg
+:local routerPublicKey [/interface wireguard get [find name=mkg-wg] public-key]
+/tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no
+:delay 2s
+/interface wireguard peers remove [find interface=mkg-wg]
+/interface wireguard peers add interface=mkg-wg public-key="${serverPublicKey}" endpoint-address="${serverHost}" endpoint-port=${serverPort} allowed-address=${vpnSubnet} persistent-keepalive=25s`)}
 `
     :"";
   const hotspotInterface = options.hotspotInterface || "bridge";
@@ -319,6 +322,8 @@ export function buildMikrotikProvisioningScript(
     options.pppoePoolRange
   );
   const loginTemplateUrl = options.loginTemplateUrl || "https://api.mashuphost.tech/api/v1/hotspot/demo-isp/mikrotik-login-template";
+  // The "you're online" page shown after a successful sign-in, served next to the login page.
+  const aloginTemplateUrl = aloginUrlFor(loginTemplateUrl);
   const apiHost = hostFromUrl(loginTemplateUrl);
   const portalHost = options.portalHost ? hostFromUrl(options.portalHost) : "captive.mashuphost.tech";
   // App-only customers must still reach the portal (to buy full internet) and the API behind it.
@@ -428,11 +433,12 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}
+:do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
 
 # Self-repair for the branded login page: if hotspot/login.html is ever missing (a setup cut short,
 # a reset of the hotspot folder), customers get MikroTik's stock sign-in page instead of the portal.
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
-:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}"} on-error={}
+:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}; :if ([:len [/file find name=\\"hotspot/alogin.html\\"]] = 0) do={:do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
 # Persistent check-in. It survives normal reboots and is safe to re-run.
 :do {/system scheduler remove [find name=mkg-heartbeat]} on-error={}
@@ -452,9 +458,11 @@ ${wireguardSection}
 ${appFilterSection}
 
 # Wi-Fi last: renaming the network disconnects anyone configuring the router over it.
-${osMajor === 7 ? "" : `:do {/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="MASHUPKGRID"} on-error={}
-`}${osMajor === 6 ? "" : `# RouterOS 7 routers with the newer "wifi" package (ax models) name the radio wifi1.
-:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap configuration.ssid="MASHUPKGRID"} on-error={}
+# Older radios (every v6 router, and v7 ones like the hAP lite) use the "wireless" package and
+# name the radio wlan1; v7 ax models use the newer "wifi" package and name it wifi1. A router has
+# one or the other, so both lines are deferred — see deferred().
+${deferred(`/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="MASHUPKGRID"`)}
+${osMajor === 6 ? "" : `${deferred(`/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap configuration.ssid="MASHUPKGRID"`)}
 `}
 :put "========================================================="
 :put "  SUCCESS! Router & Hotspot captive portal are ONLINE!  "
@@ -463,6 +471,11 @@ ${osMajor === 7 ? "" : `:do {/interface wireless set wlan1 disabled=no mode=ap-b
 `;
 
   return wrapTopLevelCommands(minimalProvisioningScript);
+}
+
+/** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */
+export function aloginUrlFor(loginTemplateUrl: string): string {
+  return loginTemplateUrl.replace(/mikrotik-login-template(\?|$)/, "mikrotik-alogin-template$1");
 }
 
 /** Opening lines naming the RouterOS version the script was made for, and a check that warns
@@ -481,13 +494,26 @@ export function buildVersionSection(osMajor: 6 | 7 | null): string {
 /** NTP: RouterOS 7 lists servers under /system ntp client servers; v6 takes them as
  *  server-dns-names. Unknown version: both, and the one the router doesn't know fails alone. */
 export function buildNtpLines(osMajor: 6 | 7 | null): string {
-  const v7 = `:do {/system ntp client set enabled=yes} on-error={}
-:do {/system ntp client servers add address=pool.ntp.org} on-error={}
-:do {/system ntp client servers add address=time.google.com} on-error={}`;
-  const v6 = `:do {/system ntp client set enabled=yes server-dns-names=pool.ntp.org,time.google.com} on-error={}`;
+  const v7 = [
+    deferred(`/system ntp client set enabled=yes`),
+    deferred(`/system ntp client servers add address=pool.ntp.org`),
+    deferred(`/system ntp client servers add address=time.google.com`),
+  ].join("\n");
+  const v6 = deferred(`/system ntp client set enabled=yes server-dns-names=pool.ntp.org,time.google.com`);
   if (osMajor === 7) return v7;
   if (osMajor === 6) return v6;
   return `${v7}\n${v6}`;
+}
+
+/** RouterOS checks a whole file before `/import` runs any of it, and a menu or parameter this
+ *  router doesn't have ("bad command name wifi" on a hAP lite, `/interface wireguard` on v6) is a
+ *  syntax error there — `on-error` never sees it and NOTHING in the script runs, not even the
+ *  check-in on its first line. So a command that only exists on some versions or packages is
+ *  handed to `:parse` as text: it is only checked when it runs, and then its failure is an
+ *  ordinary error `on-error` catches. */
+export function deferred(commands: string): string {
+  const source = commands.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/\n/g, "; ");
+  return `:do {:local mkgCmd [:parse "${source}"]; $mkgCmd} on-error={}`;
 }
 
 /** /import stops at the first command RouterOS rejects, and everything after it silently never

@@ -41,6 +41,7 @@ export interface CreateRouterInput {
   latitude?: number | null;
   longitude?: number | null;
   routerOsMajor?: 6 | 7 | null;
+  blockTethering?: boolean;
 }
 
 export type UpdateRouterInput = Partial<CreateRouterInput>;
@@ -442,6 +443,7 @@ export async function updateRouter(tenantId: string, routerId: string, patch: Up
       ...(patch.latitude !== undefined ? { latitude: patch.latitude } : {}),
       ...(patch.longitude !== undefined ? { longitude: patch.longitude } : {}),
       ...(patch.routerOsMajor !== undefined ? { routerOsMajor: patch.routerOsMajor } : {}),
+      ...(patch.blockTethering !== undefined ? { blockTethering: patch.blockTethering } : {}),
       ...(patch.username !== undefined
         ? { usernameEncrypted: encryptAtRest(patch.username, env.ENCRYPTION_KEY) }
         : {}),
@@ -622,6 +624,7 @@ export async function reconcileRouterProvisioning(routerId: string, options: { f
         // that is already online picks up a host added after it was linked.
         ...(await listWalledGardenHostsFor(router.tenantId)),
       ].filter(Boolean),
+      blockTethering: router.blockTethering,
       appFilter: {
         scriptUrl: `${routerFacingApiBase()}/api/v1/hotspot/${router.tenant.slug}/mikrotik-app-filter.rsc`,
         tag: APP_FILTER_TAG,

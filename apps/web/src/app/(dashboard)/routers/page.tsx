@@ -41,6 +41,7 @@ interface RouterRow {
   vpnIp: string | null;
   routerOsVersion: string | null;
   routerOsMajor: 6 | 7 | null;
+  blockTethering?: boolean;
 }
 
 /** The chosen RouterOS major version disagrees with the one the router last reported. */
@@ -410,6 +411,21 @@ export default function RoutersPage() {
                         <option value="6">RouterOS v6</option>
                         <option value="7">RouterOS v7</option>
                       </select>
+                      <label
+                        className="flex items-center gap-1.5 rounded-md border border-obsidian-700 bg-obsidian-950 px-1.5 py-0.5 text-xs text-slate-300"
+                        title={tr("Blocks sharing a paid connection through a phone hotspot. The paying phone is never blocked.")}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(router.blockTethering)}
+                          onChange={(e) =>
+                            apiFetch(`/api/v1/routers/${router.id}`, { method: "PATCH", body: JSON.stringify({ blockTethering: e.target.checked }) })
+                              .then(() => queryClient.invalidateQueries({ queryKey: ["routers"] }))
+                              .catch((err) => setError(err instanceof ApiRequestError ? err.message : String(err)))
+                          }
+                        />
+                        {tr("Block hotspot sharing")}
+                      </label>
                     </div>
                     <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-slate-400">
                       {router.host ? (
