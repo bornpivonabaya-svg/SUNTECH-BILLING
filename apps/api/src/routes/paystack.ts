@@ -19,6 +19,7 @@ import { checkMaintenance } from "../plugins/maintenance.js";
 import { requirePermission } from "../plugins/authorize.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { enqueueSendPaymentConfirmationEmail, enqueueSendWhatsappVoucher } from "../lib/queue.js";
+import { emailHotspotVoucherOnce } from "../lib/hotspot-voucher-email.js";
 import { emitWebhookEvent } from "../lib/webhooks.js";
 
 const staffPreHandler = [authenticate, resolveTenant, checkMaintenance] as const;
@@ -185,6 +186,7 @@ export async function paystackRoutes(app: FastifyInstance): Promise<void> {
             dataCapMb: completed.hotspotPackage?.dataCapMb ?? null,
           });
         }
+        await emailHotspotVoucherOnce(completed.tenantId, completed.hotspotEmail, completed.hotspotVoucherCode);
         if (completed.customerId) {
           void emitWebhookEvent(completed.tenantId, "payment.received", {
             method: "PAYSTACK",

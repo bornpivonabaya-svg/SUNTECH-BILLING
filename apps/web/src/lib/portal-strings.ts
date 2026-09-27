@@ -80,6 +80,11 @@ export interface PortalStrings {
   paystackHint: string;
   email: string;
   optional: string;
+  emailForVoucher: string;
+  emailVoucherHint: string;
+  emailMeCode: string;
+  sendEmail: string;
+  emailSentTo: (email: string) => string;
   sending: string;
   continueToPesapal: string;
   continueToCard: string;
@@ -175,6 +180,11 @@ const EN: PortalStrings = {
   paystackHint: "We’ll send your voucher code to this number.",
   email: "Email",
   optional: "(optional)",
+  emailForVoucher: "Email for your voucher",
+  emailVoucherHint: "We’ll email your voucher code so you have it if you disconnect.",
+  emailMeCode: "Email me this code",
+  sendEmail: "Send",
+  emailSentTo: (email) => `Sent to ${email}. Check your inbox (and spam).`,
   sending: "Sending…",
   continueToPesapal: "Continue to Pesapal",
   continueToCard: "Continue to card payment",
@@ -271,6 +281,11 @@ const SW: PortalStrings = {
   paystackHint: "Tutatuma nambari ya vocha yako kwenye nambari hii.",
   email: "Barua pepe",
   optional: "(si lazima)",
+  emailForVoucher: "Barua pepe ya vocha yako",
+  emailVoucherHint: "Tutakutumia nambari ya vocha kwa barua pepe ili uwe nayo ukikatika.",
+  emailMeCode: "Nitumie nambari hii kwa barua pepe",
+  sendEmail: "Tuma",
+  emailSentTo: (email) => `Imetumwa kwa ${email}. Angalia inbox (na spam).`,
   sending: "Inatuma…",
   continueToPesapal: "Endelea kwa Pesapal",
   continueToCard: "Endelea kulipa kwa kadi",

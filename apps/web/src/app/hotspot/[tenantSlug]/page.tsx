@@ -18,7 +18,7 @@ import {
 } from "@/components/hotspot/themes";
 import { CaptivePortalPluginContainer } from "@/components/hotspot/plugins/CaptivePortalPluginContainer";
 import { PortalSheet, SheetError, sheetInput, sheetLabel, sheetPrimary, sheetSecondary } from "@/components/hotspot/portal-sheet";
-import { loadPortalLanguage, portalStrings, savePortalLanguage, type PortalLanguage } from "@/lib/portal-strings";
+import { loadPortalLanguage, portalStrings, savePortalLanguage, type PortalLanguage, type PortalStrings } from "@/lib/portal-strings";
 
 interface TenantInfo {
   name: string;
@@ -60,6 +60,65 @@ interface PurchaseStatusResponse {
   voucherCode: string | null;
   resultDesc?: string | null;
   gatewayResponse?: string | null;
+}
+
+/** "Email me this code": sends the voucher on screen to the customer's inbox. */
+function EmailVoucherForm({ tenantSlug, code, initialEmail, t }: { tenantSlug: string; code: string; initialEmail: string; t: PortalStrings }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState(initialEmail);
+  const send = useMutation({
+    mutationFn: () =>
+      apiFetch<{ sent: boolean; email: string }>(`/api/v1/hotspot/${tenantSlug}/voucher-email`, {
+        method: "POST",
+        skipAuth: true,
+        body: JSON.stringify({ code, email: email.trim() }),
+      }),
+  });
+
+  if (send.isSuccess) {
+    return <p className="mt-3 text-sm text-emerald-700" role="status">✓ {t.emailSentTo(send.data.email)}</p>;
+  }
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="mt-3 text-sm font-medium text-emerald-700 underline underline-offset-2">
+        ✉ {t.emailMeCode}
+      </button>
+    );
+  }
+  return (
+    <form
+      className="mt-3 text-left"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (email.trim()) send.mutate();
+      }}
+    >
+      <label htmlFor="voucherEmail" className="text-xs font-semibold text-slate-700">
+        {t.email}
+      </label>
+      <div className="mt-1 flex gap-2">
+        <input
+          id="voucherEmail"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          required
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm"
+        />
+        <button type="submit" disabled={send.isPending || !email.trim()} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+          {send.isPending ? "…" : t.sendEmail}
+        </button>
+      </div>
+      {send.isError && (
+        <p className="mt-1 text-xs text-red-600" role="alert">
+          {send.error instanceof ApiRequestError ? send.error.message : "Could not send — please try again"}
+        </p>
+      )}
+    </form>
+  );
 }
 
 function formatPriceKsh(priceMinor: number): string {
@@ -502,6 +561,8 @@ export default function HotspotCaptivePortalPage() {
       // ever replays a code the router has actually already accepted once.
       rememberVoucher(tenantSlug, finalCode, data.expiresAt);
       if (data.expiresAt) setRememberedVoucher({ code: finalCode, expiresAt: data.expiresAt });
+      // A purchased code arrives here from the status poll, not the input: keep it on screen.
+      setVoucherCode(finalCode);
 
       const targetRouterLink = linkLoginOnly || DEFAULT_ROUTER_LOGIN_URL;
       handOffToRouter(targetRouterLink, finalCode, finalCode, () => {
@@ -915,6 +976,11 @@ export default function HotspotCaptivePortalPage() {
             <button type="button" onClick={() => setStalledLoginUrl(null)} className={`${sheetSecondary} mt-2`}>
               {t.showCodeInstead}
             </button>
+            {voucherCode && (
+              <div className="text-center">
+                <EmailVoucherForm tenantSlug={tenantSlug} code={voucherCode} initialEmail={buyEmail} t={t} />
+              </div>
+            )}
           </PortalSheet>
         )}
 
@@ -1136,6 +1202,7 @@ export default function HotspotCaptivePortalPage() {
                     <p className="mt-1 text-xs text-emerald-700">Saved to this device. If your phone doesn&apos;t connect automatically, enter this code on the Wi-Fi sign-in screen.</p>
                   </div>
                 )}
+                {voucherCode && <EmailVoucherForm tenantSlug={tenantSlug} code={voucherCode} initialEmail={buyEmail} t={t} />}
               </div>
             ) : pollingStatus === "PENDING" ? (
               <div className="text-center">
@@ -1248,22 +1315,22 @@ export default function HotspotCaptivePortalPage() {
                     : t.paystackHint}
                 </p>
 
-                {(selectedGateway === "PAYSTACK" || selectedGateway === "PESAPAL") && (
-                  <>
-                    <label htmlFor="buyEmail" className={`${sheetLabel} mt-4`}>
-                      {t.email} {selectedGateway === "PESAPAL" && <span className="font-normal text-slate-400">{t.optional}</span>}
-                    </label>
-                    <input
-                      id="buyEmail"
-                      type="email"
-                      placeholder="you@example.com"
-                      value={buyEmail}
-                      onChange={(e) => setBuyEmail(e.target.value)}
-                      className={sheetInput}
-                      required={selectedGateway === "PAYSTACK"}
-                    />
-                  </>
-                )}
+                <label htmlFor="buyEmail" className={`${sheetLabel} mt-4`}>
+                  {selectedGateway === "MPESA" ? t.emailForVoucher : t.email}{" "}
+                  {selectedGateway !== "PAYSTACK" && <span className="font-normal text-slate-400">{t.optional}</span>}
+                </label>
+                <input
+                  id="buyEmail"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={buyEmail}
+                  onChange={(e) => setBuyEmail(e.target.value)}
+                  className={sheetInput}
+                  required={selectedGateway === "PAYSTACK"}
+                />
+                <p className="mt-1.5 text-xs text-slate-500">{t.emailVoucherHint}</p>
 
                 {error && (
                   <div className="mt-3">

@@ -7,6 +7,7 @@ import { QUEUE_NAMES, JOB_NAMES, AUTOMATION_JOBS, type AutomationSummary } from 
 import { handleSendVerificationEmail } from "./jobs/send-verification-email.js";
 import { handleSendPasswordResetEmail } from "./jobs/send-password-reset-email.js";
 import { handleSendPaymentConfirmationEmail } from "./jobs/send-payment-confirmation-email.js";
+import { handleSendHotspotVoucherEmail } from "./jobs/send-hotspot-voucher-email.js";
 import { handleSendTenantWelcomeEmail } from "./jobs/send-tenant-welcome-email.js";
 import { handleSendEmailOtp } from "./jobs/send-email-otp.js";
 import { handleSendInvoiceEmail, handleSendPendingInvoiceEmails } from "./jobs/invoice-email.js";
@@ -78,6 +79,8 @@ async function main() {
           return handleSendPasswordResetEmail(job.data);
         case JOB_NAMES.sendPaymentConfirmationEmail:
           return handleSendPaymentConfirmationEmail(job.data);
+        case JOB_NAMES.sendHotspotVoucherEmail:
+          return handleSendHotspotVoucherEmail(job.data);
         case JOB_NAMES.sendTenantWelcomeEmail:
           return handleSendTenantWelcomeEmail(job.data);
         case JOB_NAMES.sendEmailOtp:

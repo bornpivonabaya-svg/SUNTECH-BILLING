@@ -127,6 +127,15 @@ export const sendWhatsappVoucherJobSchema = z.object({
 });
 export type SendWhatsappVoucherJob = z.infer<typeof sendWhatsappVoucherJobSchema>;
 
+/** A hotspot voucher emailed to whoever bought it (or asked for it on the success screen). The
+ *  worker reads the voucher and the ISP from the database, so the job carries only what to find. */
+export const sendHotspotVoucherEmailJobSchema = z.object({
+  tenantId: z.string().uuid(),
+  email: z.string().email(),
+  voucherCode: z.string().min(1).max(64),
+});
+export type SendHotspotVoucherEmailJob = z.infer<typeof sendHotspotVoucherEmailJobSchema>;
+
 /** Sent to a new ISP owner right after their tenant is created. Deliberately carries the
  *  username but NOT the password — see the handler for why that line is drawn here. */
 export const sendWhatsappTenantWelcomeJobSchema = z.object({
@@ -200,6 +209,7 @@ export const JOB_NAMES = {
   sendVerificationEmail: "send-verification-email",
   sendPasswordResetEmail: "send-password-reset-email",
   sendPaymentConfirmationEmail: "send-payment-confirmation-email",
+  sendHotspotVoucherEmail: "send-hotspot-voucher-email",
   applyScheduledMaintenance: "apply-scheduled-maintenance",
   cleanupExpiredTokens: "cleanup-expired-tokens",
   // Phase 2 — core ISP billing (docs/architecture/09-phase2-plan.md). Each is CRITICAL-adjacent

@@ -147,6 +147,8 @@ export async function initiateStkPushForCustomer(
 export interface InitiateHotspotStkPushInput {
   hotspotPackageId: string;
   phone: string;
+  /** Where to email the voucher once the payment completes. */
+  email?: string | null;
 }
 
 export async function initiateHotspotPurchaseStkPush(
@@ -179,6 +181,7 @@ export async function initiateHotspotPurchaseStkPush(
     data: {
       tenantId,
       hotspotPackageId: pkg.id,
+      hotspotEmail: input.email?.trim().toLowerCase() || null,
       phone,
       amountMinor: pkg.priceMinor,
       merchantRequestId: response.MerchantRequestID,
