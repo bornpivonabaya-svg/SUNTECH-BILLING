@@ -1113,7 +1113,7 @@ export default function HotspotCaptivePortalPage() {
                   <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-center">
                     <p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Your Voucher Code</p>
                     <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-emerald-950">{voucherCode}</p>
-                    <p className="mt-1 text-xs text-emerald-700">Saved to this device. If your phone doesn't connect automatically, enter this code on the Wi-Fi sign-in screen.</p>
+                    <p className="mt-1 text-xs text-emerald-700">Saved to this device. If your phone doesn&apos;t connect automatically, enter this code on the Wi-Fi sign-in screen.</p>
                   </div>
                 )}
               </div>
