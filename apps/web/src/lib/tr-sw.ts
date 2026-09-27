@@ -1075,5 +1075,8 @@ export const SW: Record<string, string> = {
   "Storage": "Hifadhi",
   "Memory": "Kumbukumbu",
   "reported": "imeripoti",
-  "No health readings yet. Run the router's setup command once more to turn on CPU, memory, temperature and uptime reports.": "Bado hakuna vipimo vya afya. Endesha amri ya kusanidi ruta mara moja zaidi ili kuwasha ripoti za CPU, kumbukumbu, joto na muda wa kuwaka.",
+  "No health readings yet: this router runs an older setup. Get its setup command below and run it once more to turn on CPU, memory, temperature and uptime reports.": "Bado hakuna vipimo vya afya: ruta hii inatumia usanidi wa zamani. Chukua amri yake ya kusanidi hapa chini na uiendeshe mara moja zaidi ili kuwasha ripoti za CPU, kumbukumbu, joto na muda wa kuwaka.",
+  "Get setup command": "Pata amri ya kusanidi",
+  "Setup command": "Amri ya kusanidi",
+  "Paste this into WinBox → New Terminal on this router. It keeps its settings and customers, and stays online while it updates.": "Bandika hii kwenye WinBox → New Terminal ya ruta hii. Inabaki na mipangilio na wateja wake, na inaendelea kuwa mtandaoni inaposasishwa.",
 };

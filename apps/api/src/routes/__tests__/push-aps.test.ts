@@ -43,8 +43,10 @@ describe("router access-point push", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    h.prisma.router.findFirst.mockImplementation(async ({ where }: { where: { provisionTokenHash?: string } }) =>
-      where.provisionTokenHash === hashToken("good-token") ? ROUTER : null
+    // A router is found by its current token or the previous one (findRouterByProvisionToken).
+    h.prisma.router.findFirst.mockImplementation(
+      async ({ where }: { where: { OR?: { provisionTokenHash?: string; previousProvisionTokenHash?: string }[] } }) =>
+        where.OR?.some((w) => (w.provisionTokenHash ?? w.previousProvisionTokenHash) === hashToken("good-token")) ? ROUTER : null
     );
   });
 
