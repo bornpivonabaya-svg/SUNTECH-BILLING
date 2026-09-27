@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Router } from "@mashupkgrid/database";
-import { buildMikrotikProvisioningScript, buildMikrotikWinboxScript, managementSources } from "../setup-script.js";
+import { buildMikrotikProvisioningScript, buildMikrotikWinboxScript, deferred, managementSources } from "../setup-script.js";
 
 const router = { id: "11111111-1111-1111-1111-111111111111", name: "hAP test", apiPort: 8728, useTls: false } as unknown as Router;
 const credentials = { username: "mashupkgrid-api", password: "router-generated-secret" };
@@ -149,14 +149,26 @@ describe("router setup script — RouterOS version chosen when adding the router
     expect(script).not.toContain("/interface wifi set");
   });
 
-  it("v7: WireGuard, v7 NTP servers and the newer wifi radio", () => {
+  it("v7: WireGuard, v7 NTP servers, and both radio packages (a v7 hAP lite still has the older one)", () => {
     const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, routerOsMajor: 7 });
     expect(script).toContain("/interface wireguard add name=mkg-wg");
     expect(script).toContain("/system ntp client servers add address=pool.ntp.org");
     expect(script).not.toContain("server-dns-names");
     expect(script).toContain('!= "7") do={');
     expect(script).toContain("/interface wifi set [find default-name=wifi1]");
-    expect(script).not.toContain("/interface wireless set wlan1");
+    expect(script).toContain("/interface wireless set wlan1");
+  });
+
+  it("hands every version- or package-only command to :parse, so a router without it still runs the rest", () => {
+    // RouterOS checks the whole file before /import runs any of it: one bare "/interface wifi"
+    // on a hAP lite rejected the entire script, check-in included.
+    const onlySome = /\/interface (wifi|wireless|wireguard)\b|\/system ntp client/;
+    for (const routerOsMajor of [6, 7, null]) {
+      const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, routerOsMajor });
+      for (const line of script.split("\n").filter((l) => !l.startsWith("#") && onlySome.test(l))) {
+        expect(line).toMatch(/^:do \{:local mkgCmd \[:parse "/);
+      }
+    }
   });
 
   it("not chosen: detects on the router and carries both variants", () => {
@@ -186,5 +198,13 @@ describe("router setup script — anti-tethering", () => {
       expect(script).toContain('/ip firewall mangle add chain=prerouting src-address-list="mashup-anti-tether" ttl=equal:63 action=change-ttl new-ttl=set:1');
       expect(script.includes("chain=prerouting hotspot=auth ttl=equal:63")).toBe(blockTethering);
     }
+  });
+});
+
+describe("deferred commands", () => {
+  it("escapes quotes and variables so the text reaches :parse unchanged", () => {
+    expect(deferred('/tool fetch url="https://x/y" http-data=$key\n:delay 2s')).toBe(
+      ':do {:local mkgCmd [:parse "/tool fetch url=\\"https://x/y\\" http-data=\\$key; :delay 2s"]; $mkgCmd} on-error={}'
+    );
   });
 });

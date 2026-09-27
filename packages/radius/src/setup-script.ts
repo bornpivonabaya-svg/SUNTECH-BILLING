@@ -299,20 +299,16 @@ export function buildMikrotikProvisioningScript(
     ? `
 # Optional management VPN (RouterOS v7+). This is deliberately last: a legacy or low-resource
 # hAP must still finish hotspot provisioning even when WireGuard is unavailable.
-:if ([:pick [/system resource get version] 0 2] = "7.") do={
-  :do {
-  /interface wireguard remove [find name=mkg-wg]
-  /interface wireguard add name=mkg-wg listen-port=${serverPort}
-  :delay 2s
-  /ip address remove [find interface=mkg-wg]
-  /ip address add address=${vpnIp}/32 interface=mkg-wg
-  :local routerPublicKey [/interface wireguard get [find name=mkg-wg] public-key]
-  /tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no
-  :delay 2s
-  /interface wireguard peers remove [find interface=mkg-wg]
-  /interface wireguard peers add interface=mkg-wg public-key="${serverPublicKey}" endpoint-address="${serverHost}" endpoint-port=${serverPort} allowed-address=${vpnSubnet} persistent-keepalive=25s
-  } on-error={}
-}
+${deferred(`/interface wireguard remove [find name=mkg-wg]
+/interface wireguard add name=mkg-wg listen-port=${serverPort}
+:delay 2s
+/ip address remove [find interface=mkg-wg]
+/ip address add address=${vpnIp}/32 interface=mkg-wg
+:local routerPublicKey [/interface wireguard get [find name=mkg-wg] public-key]
+/tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no
+:delay 2s
+/interface wireguard peers remove [find interface=mkg-wg]
+/interface wireguard peers add interface=mkg-wg public-key="${serverPublicKey}" endpoint-address="${serverHost}" endpoint-port=${serverPort} allowed-address=${vpnSubnet} persistent-keepalive=25s`)}
 `
     :"";
   const hotspotInterface = options.hotspotInterface || "bridge";
@@ -462,9 +458,11 @@ ${wireguardSection}
 ${appFilterSection}
 
 # Wi-Fi last: renaming the network disconnects anyone configuring the router over it.
-${osMajor === 7 ? "" : `:do {/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="MASHUPKGRID"} on-error={}
-`}${osMajor === 6 ? "" : `# RouterOS 7 routers with the newer "wifi" package (ax models) name the radio wifi1.
-:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap configuration.ssid="MASHUPKGRID"} on-error={}
+# Older radios (every v6 router, and v7 ones like the hAP lite) use the "wireless" package and
+# name the radio wlan1; v7 ax models use the newer "wifi" package and name it wifi1. A router has
+# one or the other, so both lines are deferred — see deferred().
+${deferred(`/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="MASHUPKGRID"`)}
+${osMajor === 6 ? "" : `${deferred(`/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap configuration.ssid="MASHUPKGRID"`)}
 `}
 :put "========================================================="
 :put "  SUCCESS! Router & Hotspot captive portal are ONLINE!  "
@@ -496,13 +494,26 @@ export function buildVersionSection(osMajor: 6 | 7 | null): string {
 /** NTP: RouterOS 7 lists servers under /system ntp client servers; v6 takes them as
  *  server-dns-names. Unknown version: both, and the one the router doesn't know fails alone. */
 export function buildNtpLines(osMajor: 6 | 7 | null): string {
-  const v7 = `:do {/system ntp client set enabled=yes} on-error={}
-:do {/system ntp client servers add address=pool.ntp.org} on-error={}
-:do {/system ntp client servers add address=time.google.com} on-error={}`;
-  const v6 = `:do {/system ntp client set enabled=yes server-dns-names=pool.ntp.org,time.google.com} on-error={}`;
+  const v7 = [
+    deferred(`/system ntp client set enabled=yes`),
+    deferred(`/system ntp client servers add address=pool.ntp.org`),
+    deferred(`/system ntp client servers add address=time.google.com`),
+  ].join("\n");
+  const v6 = deferred(`/system ntp client set enabled=yes server-dns-names=pool.ntp.org,time.google.com`);
   if (osMajor === 7) return v7;
   if (osMajor === 6) return v6;
   return `${v7}\n${v6}`;
+}
+
+/** RouterOS checks a whole file before `/import` runs any of it, and a menu or parameter this
+ *  router doesn't have ("bad command name wifi" on a hAP lite, `/interface wireguard` on v6) is a
+ *  syntax error there — `on-error` never sees it and NOTHING in the script runs, not even the
+ *  check-in on its first line. So a command that only exists on some versions or packages is
+ *  handed to `:parse` as text: it is only checked when it runs, and then its failure is an
+ *  ordinary error `on-error` catches. */
+export function deferred(commands: string): string {
+  const source = commands.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/\n/g, "; ");
+  return `:do {:local mkgCmd [:parse "${source}"]; $mkgCmd} on-error={}`;
 }
 
 /** /import stops at the first command RouterOS rejects, and everything after it silently never
