@@ -3,7 +3,8 @@ import { structureTool } from "sanity/structure";
 import { visionTool } from "@sanity/vision";
 import { schemaTypes } from "./schemaTypes";
 
-const projectId = process.env.SANITY_STUDIO_PROJECT_ID || "";
+/** The MashupHost project on sanity.io (not a secret: it is in every public query URL). */
+const projectId = process.env.SANITY_STUDIO_PROJECT_ID || "xmn0tjwm";
 const dataset = process.env.SANITY_STUDIO_DATASET || "production";
 
 /** The homepage is one document with a fixed id ("homepage"), which is what the website reads. */

@@ -9,14 +9,13 @@ web app runs React 18, so they never share dependencies. Nothing here is built i
 
 ## One-time setup (about 10 minutes)
 
-1. **Create the project.** Sign in at <https://www.sanity.io/manage> (free plan is enough) →
-   *Create new project* → name it "MashupHost website", dataset `production`, **public**.
-   Copy the **Project ID**.
+1. **The project** is `xmn0tjwm` (already set in this folder). In <https://www.sanity.io/manage>
+   → that project → *Datasets*, make sure a dataset named `production` exists and is **public**
+   (create it if not).
 
 2. **Install and log in** (needs Node 22.12+):
    ```bash
    cd studio
-   cp .env.example .env          # put your Project ID in SANITY_STUDIO_PROJECT_ID
    npm install
    npx sanity login
    ```
@@ -26,7 +25,8 @@ web app runs React 18, so they never share dependencies. Nothing here is built i
    npm run seed
    ```
 
-4. **Put the Studio online** (free, at `https://<name>.sanity.studio`):
+4. **Put the Studio online** (free, at `https://mashuphost.sanity.studio` — if that name is
+   taken, change `studioHost` in `sanity.cli.ts`):
    ```bash
    npm run deploy
    ```
@@ -34,7 +34,7 @@ web app runs React 18, so they never share dependencies. Nothing here is built i
 
 5. **Point the website at it.** In the server's `.env.production`:
    ```
-   SANITY_PROJECT_ID=<your project id>
+   SANITY_PROJECT_ID=xmn0tjwm
    SANITY_DATASET=production
    SANITY_REVALIDATE_SECRET=<any long random string>
    ```
