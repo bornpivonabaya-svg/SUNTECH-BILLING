@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { LandingClient } from "./landing-client";
 import { DEFAULT_LANDING_CONTENT, type LandingContent } from "@/lib/landing-content";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
+import { DEFAULT_LANDING_SECTIONS, type LandingSections } from "@/lib/landing-sections";
+import { fetchSanityHomepage } from "@/lib/sanity";
 
 /**
  * Fetches the operator's published landing copy on the server.
@@ -106,8 +108,34 @@ const softwareJsonLd = {
   // result. Add it only once genuine reviews exist to point at.
 };
 
+/**
+ * Sanity, when it's set up, has the last word: each section it has filled replaces the same
+ * section from the landing editor (or the built-in defaults); anything left empty there keeps
+ * what the page had. Without SANITY_PROJECT_ID this is exactly the old behaviour.
+ */
+async function loadHomepage(): Promise<{ content: LandingContent; sections: LandingSections }> {
+  const [base, cms] = await Promise.all([loadLandingContent(), fetchSanityHomepage()]);
+  if (!cms) return { content: base, sections: DEFAULT_LANDING_SECTIONS };
+  const c = cms.content;
+  return {
+    content: {
+      ...base,
+      announcement: { ...base.announcement, ...(c.announcement ?? {}) },
+      hero: { ...base.hero, ...(c.hero ?? {}) },
+      pricing: { ...base.pricing, ...(c.pricing ?? {}) },
+      faqs: c.faqs ?? base.faqs,
+      footer: { ...base.footer, ...(c.footer ?? {}) },
+    },
+    sections: {
+      ...DEFAULT_LANDING_SECTIONS,
+      ...cms.sections,
+      network: { ...DEFAULT_LANDING_SECTIONS.network, ...(cms.sections.network ?? {}) },
+    },
+  };
+}
+
 export default async function Page() {
-  const landingContent = await loadLandingContent();
+  const { content: landingContent, sections } = await loadHomepage();
 
   /**
    * FAQ rich-result markup, built from the FAQs actually rendered on the page — never a separate
@@ -142,7 +170,7 @@ export default async function Page() {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
         />
       )}
-      <LandingClient initialContent={landingContent} />
+      <LandingClient initialContent={landingContent} sections={sections} />
     </>
   );
 }

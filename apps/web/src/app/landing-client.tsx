@@ -3,6 +3,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import { DEFAULT_LANDING_CONTENT, type LandingContent } from "@/lib/landing-content";
+import { DEFAULT_LANDING_SECTIONS, type LandingIcon, type LandingSections } from "@/lib/landing-sections";
 import { SiteHeader } from "@/components/marketing/site-header";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SUPPORT_PHONE_DISPLAY, whatsappLink } from "@/components/marketing/brand";
@@ -26,6 +27,21 @@ import {
 
 type Icon = ComponentType<IconProps>;
 
+const ICONS: Record<LandingIcon, Icon> = {
+  router: IconRouter,
+  mpesa: IconMpesa,
+  growth: IconPulse,
+  shield: IconShield,
+  ticket: IconTicket,
+  users: IconUsers,
+  whatsapp: IconWhatsApp,
+  invoice: IconInvoice,
+  lock: IconLock,
+  message: IconMessage,
+  globe: IconGlobe,
+};
+const iconFor = (name: string): Icon => ICONS[name as LandingIcon] ?? IconCheck;
+
 // ---------------------------------------------------------------------------------------------
 // Copy. Every capability named below exists in this codebase — see the file noted beside each.
 // ---------------------------------------------------------------------------------------------
@@ -42,146 +58,6 @@ const INTEGRATIONS = [
 /** Also supported, shown smaller so the headline row stays focused. */
 const MORE_INTEGRATIONS = ["Paystack", "Pesapal", "Africa's Talking SMS", "WireGuard"];
 
-/** The platform in four groups, so a visitor sees everything without scrolling past a card
- *  per feature. Every bullet is a shipped feature (routes in apps/api, pages in apps/web). */
-const FEATURE_GROUPS: { title: string; body: string; icon: Icon; mpesa?: boolean; bullets: string[] }[] = [
-  {
-    title: "Your network, from anywhere",
-    body: "Link a MikroTik with one script and run it from the dashboard — even behind a Safaricom, Airtel or Faiba SIM.",
-    icon: IconRouter,
-    bullets: [
-      "One setup script for RouterOS v6 or v7",
-      "Remote WinBox through the platform, no public IP needed",
-      "VLANs set up for you: hotspot and PPPoE each on their own",
-      "Config backups with one-click restore",
-      "Scheduled RouterOS updates, health graphs and down alerts",
-      "Walled garden for your own site and payment pages",
-    ],
-  },
-  {
-    title: "Billing that runs itself",
-    body: "Invoices, reminders, suspension and reconnection happen on schedule, and M-Pesa payments land on the right account.",
-    icon: IconMpesa,
-    mpesa: true,
-    bullets: [
-      "M-Pesa STK Push, Paybill and Till — into your own account",
-      "Service back on within a minute of paying",
-      "Prepaid add-ons: speed boosts and extra data",
-      "Pause a plan for travel, family and business accounts",
-      "KRA VAT report and Xero / QuickBooks export",
-      "Hotspot vouchers, printed or sent by WhatsApp",
-    ],
-  },
-  {
-    title: "Tools to grow",
-    body: "Win new customers and keep the ones you have, without a separate marketing tool.",
-    icon: IconPulse,
-    bullets: [
-      "Agents and resellers selling vouchers on commission",
-      "Bulk SMS and WhatsApp campaigns",
-      "Win-back offers for customers about to leave",
-      "Referral rewards and plan-upgrade suggestions",
-      "Coverage check and signup requests from your website",
-      "Revenue, usage and online-users reports",
-    ],
-  },
-  {
-    title: "Run your team",
-    body: "Everyone gets the access they need and nothing more, and every change is on record.",
-    icon: IconShield,
-    bullets: [
-      "Staff roles for admins, cashiers and technicians",
-      "Two-step login for staff accounts",
-      "Field job cards for installs and repairs",
-      "Audit log of who changed what, and when",
-      "Automation page showing every background job",
-      "Dashboard in English and Kiswahili, on any phone",
-    ],
-  },
-];
-
-const SHOWCASE_POINTS = [
-  "See who is online now, what they paid and what they owe",
-  "Hotspot and PPPoE customers in one list",
-  "Suspend, reconnect or pause a customer in one click",
-  "Your own logo, colours and domain — set up with your domain company detected for you",
-  "Works on a phone as well as a laptop",
-];
-
-const STEPS = [
-  { title: "Connect Your Network", body: "Paste one setup script into your MikroTik to link it to MashupHost." },
-  { title: "Add Subscribers", body: "Create customer accounts for PPPoE and hotspot users." },
-  { title: "Set Packages", body: "Define speeds, prices and billing cycles for what you sell." },
-  { title: "Automate Billing", body: "Invoices, reminders and suspensions run on their own." },
-  { title: "Get Paid & Grow", body: "Collect through M-Pesa and track revenue as it lands." },
-];
-
-const PLAN_INCLUDES = [
-  "Subscriber and package management",
-  "Automated invoicing, reminders and reconnection",
-  "M-Pesa STK Push, Paybill and Till",
-  "MikroTik, RADIUS and remote WinBox",
-  "Hotspot captive portal and vouchers",
-  "Customer app, AI assistant and WhatsApp messages",
-];
-
-/** What a subscriber gets. Every item is a shipped surface: apps/web/src/app/hotspot (captive
- *  portal), components/customer-portal.tsx (bills + M-Pesa self-pay), the worker's invoice and
- *  dunning emails, packages/whatsapp (service status messages). */
-const CUSTOMER_POINTS: { title: string; body: string; icon: Icon; bullets: string[] }[] = [
-  {
-    title: "Branded captive portal",
-    body: "Walk-in customers connect to your Wi-Fi, pick a package and pay by M-Pesa — online in seconds, no voucher paper needed.",
-    icon: IconTicket,
-    bullets: ["Your logo, colours and support number", "Reconnects the same phone automatically", "Works on a MikroTik you already own"],
-  },
-  {
-    title: "Customer portal",
-    body: "Monthly subscribers sign in to see whether their internet is on, what they owe, and pay it from their phone.",
-    icon: IconUsers,
-    bullets: ["Installs on their phone like an app", "Pay with one M-Pesa prompt; back online within a minute", "Pause the plan, buy add-ons, add family members"],
-  },
-  {
-    title: "Help that answers",
-    body: "Reminders and service updates go out by SMS, email and WhatsApp, and an assistant answers questions about bills and connections day and night.",
-    icon: IconWhatsApp,
-    bullets: ["Due-soon, overdue and reconnection notices", "Check balance and pay on WhatsApp", "AI assistant in English and Kiswahili, hands over to your team"],
-  },
-];
-
-const OPERATOR_POINTS: { title: string; body: string; icon: Icon }[] = [
-  {
-    title: "Your money, your choice",
-    body: "Collect straight into your own Paybill or Till, or let MashupHost collect and settle to you.",
-    icon: IconMpesa,
-  },
-  {
-    title: "Works on any connection",
-    body: "Routers reach the platform over their own VPN, so a SIM or fibre line behind carrier NAT is fine. No proprietary hardware.",
-    icon: IconRouter,
-  },
-  {
-    title: "In English and Kiswahili",
-    body: "The dashboard, customer app, captive portal and assistant all switch language with one tap.",
-    icon: IconMessage,
-  },
-  {
-    title: "Kenyan tax and books",
-    body: "A KRA VAT report every month, and invoices and payments exported for Xero or QuickBooks.",
-    icon: IconInvoice,
-  },
-  {
-    title: "Security built in",
-    body: "Two-step login for staff, and M-Pesa and gateway credentials encrypted at rest.",
-    icon: IconLock,
-  },
-  {
-    title: "Your brand, your domain",
-    body: "Your logo and colours on every portal. Type your domain and we detect Namecheap, GoDaddy, Hostinger or Cloudflare and show you exactly what to add.",
-    icon: IconGlobe,
-  },
-];
-
 /** Set to a plan name to give it the highlighted treatment. Left unset on purpose: there is no
  *  sales data in the project saying which plan most customers choose, and a "Most popular" badge
  *  is a factual claim. */
@@ -191,8 +67,9 @@ const FEATURED_PLAN: string | null = null;
 
 /** One feature group. On phones only the first three points show until "Show more" is
  *  tapped, so the section isn't several screens long; from `sm` up every point is visible. */
-function FeatureGroupCard({ group }: { group: (typeof FEATURE_GROUPS)[number] }) {
-  const { title, body, icon: FeatureIcon, mpesa, bullets } = group;
+function FeatureGroupCard({ group }: { group: LandingSections["featureGroups"][number] }) {
+  const { title, body, mpesa, bullets } = group;
+  const FeatureIcon = iconFor(group.icon);
   const [open, setOpen] = useState(false);
   return (
     <li className="rounded-lg border border-slate-200 bg-white p-5 sm:p-6">
@@ -317,8 +194,9 @@ function formatKes(amount: number): string {
   return new Intl.NumberFormat("en-KE").format(amount);
 }
 
-export function LandingClient({ initialContent }: { initialContent?: LandingContent }) {
+export function LandingClient({ initialContent, sections: givenSections }: { initialContent?: LandingContent; sections?: LandingSections }) {
   const content = initialContent ?? DEFAULT_LANDING_CONTENT;
+  const sections = givenSections ?? DEFAULT_LANDING_SECTIONS;
   const { hero, pricing, faqs, footer } = content;
   const [annual, setAnnual] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
@@ -375,7 +253,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                 </SecondaryButton>
               </div>
               <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
-                {["English & Kiswahili", "Works behind any SIM or NAT", "No per-router fees"].map((item) => (
+                {sections.heroTicks.map((item) => (
                   <li key={item} className="flex items-center gap-2">
                     <IconCheck size={16} className="text-emerald-600" aria-hidden="true" />
                     {item}
@@ -422,7 +300,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
               body="Network, billing, growth and your team — the tools a Kenyan ISP uses every day, connected so nothing is typed twice."
             />
             <ul className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-2">
-              {FEATURE_GROUPS.map((group) => (
+              {sections.featureGroups.map((group) => (
                 <FeatureGroupCard key={group.title} group={group} />
               ))}
             </ul>
@@ -433,20 +311,13 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
         <section id="network" aria-labelledby="network-title" className="scroll-mt-20 border-t border-slate-200 bg-slate-950 text-white">
           <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-14 sm:px-6 sm:py-24 lg:grid-cols-2 lg:gap-16 lg:px-8">
             <div>
-              <p className="text-sm font-semibold text-blue-300">For your network team</p>
+              <p className="text-sm font-semibold text-blue-300">{sections.network.eyebrow}</p>
               <h2 id="network-title" className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Remote WinBox and VLANs, without the site visit
+                {sections.network.title}
               </h2>
-              <p className="mt-4 text-base leading-7 text-slate-300">
-                Each router dials out to MashupHost over its own encrypted tunnel, so you can open it in WinBox from anywhere — even on a SIM behind carrier NAT. Add a VLAN in the dashboard and the router gets its own hotspot or PPPoE server on it, set up for you.
-              </p>
+              <p className="mt-4 text-base leading-7 text-slate-300">{sections.network.body}</p>
               <ul className="mt-6 space-y-3 text-sm text-slate-200">
-                {[
-                  "WinBox from your office or phone, with no public IP and no port forwarding",
-                  "Hotspot on one VLAN and PPPoE on another, each running on its own",
-                  "A router that was offline finishes its setup the moment it's back",
-                  "Step-by-step VLAN and PPPoE manual, in English and Kiswahili",
-                ].map((b) => (
+                {sections.network.bullets.map((b) => (
                   <li key={b} className="flex gap-2.5">
                     <IconCheck size={17} className="mt-0.5 shrink-0 text-emerald-400" aria-hidden="true" />
                     {b}
@@ -469,7 +340,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                 body="From subscriber management to payments and reporting, MashupHost gives you full control of your ISP business."
               />
               <ul className="mt-8 space-y-3.5">
-                {SHOWCASE_POINTS.map((point) => (
+                {sections.showcasePoints.map((point) => (
                   <li key={point} className="flex gap-3 text-[15px] text-slate-700">
                     <IconCheck size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
                     {point}
@@ -498,7 +369,9 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
               body="Your subscribers see your brand, not ours: a captive portal to buy Wi-Fi, a portal to pay bills, and messages that arrive where they already are."
             />
             <ul className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-3">
-              {CUSTOMER_POINTS.map(({ title, body, icon: PointIcon, bullets }) => (
+              {sections.customerPoints.map(({ title, body, icon, bullets }) => {
+                const PointIcon = iconFor(icon);
+                return (
                 <li key={title} className="rounded-lg border border-slate-200 bg-white p-6">
                   <span className="grid h-10 w-10 place-items-center rounded-md border border-blue-100 bg-blue-50 text-blue-700">
                     <PointIcon size={20} aria-hidden="true" />
@@ -514,7 +387,8 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                     ))}
                   </ul>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         </section>
@@ -524,10 +398,10 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
           <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <SectionHeading id="how-title" eyebrow="How it works" title="Live in five steps" align="center" />
             <ol className="relative mt-14 grid gap-0 lg:grid-cols-5 lg:gap-6">
-              {STEPS.map((step, i) => (
+              {sections.steps.map((step, i) => (
                 <li key={step.title} className="relative flex gap-5 pb-10 last:pb-0 lg:block lg:pb-0">
                   {/* Connector: vertical on mobile, horizontal on desktop */}
-                  {i < STEPS.length - 1 && (
+                  {i < sections.steps.length - 1 && (
                     <>
                       <span aria-hidden="true" className="absolute left-5 top-11 bottom-1 w-px bg-slate-200 lg:hidden" />
                       <span aria-hidden="true" className="absolute left-14 right-0 top-5 hidden h-px bg-slate-200 lg:block" />
@@ -636,7 +510,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                   </p>
                 </div>
                 <ul className="grid flex-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-                  {PLAN_INCLUDES.map((item) => (
+                  {sections.planIncludes.map((item) => (
                     <li key={item} className="flex gap-2.5 text-sm text-slate-700">
                       <IconCheck size={17} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
                       {item}
@@ -658,7 +532,9 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
               body="MashupHost is built around M-Pesa, MikroTik and the day-to-day of running a network in Kenya — not adapted from software made for somewhere else."
             />
             <ul className="mt-10 grid gap-x-10 gap-y-6 sm:mt-14 sm:grid-cols-2 sm:gap-y-10 lg:grid-cols-3">
-              {OPERATOR_POINTS.map(({ title, body, icon: PointIcon }) => (
+              {sections.operatorPoints.map(({ title, body, icon }) => {
+                const PointIcon = iconFor(icon);
+                return (
                 <li key={title} className="flex gap-4">
                   <PointIcon size={20} className="mt-0.5 shrink-0 text-blue-700" aria-hidden="true" />
                   <div>
@@ -666,7 +542,8 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                     <p className="mt-1.5 text-sm leading-6 text-slate-600">{body}</p>
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         </section>
