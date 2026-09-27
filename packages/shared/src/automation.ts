@@ -132,6 +132,16 @@ export const AUTOMATION_JOBS: readonly AutomationJobDefinition[] = [
     tenantVisible: true,
   },
   {
+    name: JOB_NAMES.checkPendingDomains,
+    queue: QUEUE_NAMES.network,
+    category: "network",
+    label: "Check custom domains",
+    description: "Keeps checking newly added custom domains until their DNS points here, then switches them on.",
+    everyMs: 5 * MINUTE,
+    counters: { verified: "Now live", waiting: "Waiting for DNS" },
+    tenantVisible: true,
+  },
+  {
     name: JOB_NAMES.retryPendingVlans,
     queue: QUEUE_NAMES.network,
     category: "network",

@@ -228,6 +228,7 @@ export const JOB_NAMES = {
   resumePausedPlans: "resume-paused-plans",
   sweepAddOns: "sweep-addons",
   retryPendingVlans: "retry-pending-vlans",
+  checkPendingDomains: "check-pending-domains",
   winBackOffers: "win-back-offers",
   sendCampaigns: "send-campaigns",
   expireOverdueVouchers: "expire-overdue-vouchers",

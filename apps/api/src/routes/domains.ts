@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { resolveCname } from "node:dns/promises";
 import { prisma } from "@mashupkgrid/database";
 import { env } from "@mashupkgrid/config";
 import { successResponse, ConflictError, NotFoundError, ValidationError, generateSecureToken } from "@mashupkgrid/shared";
@@ -9,6 +8,7 @@ import { resolveTenant } from "../plugins/tenant.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
 import { requirePermission } from "../plugins/authorize.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { planDomainSetup, verifyDomain, domainTarget } from "@mashupkgrid/network";
 
 const preHandler = [authenticate, resolveTenant, checkMaintenance] as const;
 
@@ -34,7 +34,7 @@ function requireTenant(tenantId: string | null): string {
  *  control *and* correct tenant association in one real check (see the multi-tenant-domains
  *  plan's rationale). */
 function expectedCnameTarget(tenantSlug: string): string {
-  return `${tenantSlug}.${env.PLATFORM_BASE_DOMAIN}`;
+  return domainTarget(tenantSlug, env.PLATFORM_BASE_DOMAIN);
 }
 
 function normalizeHostname(value: string): string {
@@ -58,6 +58,31 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
         orderBy: { createdAt: "asc" },
       });
       reply.send(successResponse(domains, request.id));
+    }
+  );
+
+  /** While the ISP types a domain: who runs its DNS (Namecheap, GoDaddy, Hostinger, Cloudflare…),
+   *  that company's steps, and the exact record to add. Nothing is saved. */
+  app.post(
+    "/detect",
+    { config: { audience: "staff" as const }, preHandler: [...preHandler, requirePermission("settings.manage")] },
+    async (request, reply) => {
+      const tenantId = requireTenant(request.user!.tenantId);
+      const { hostname } = addDomainSchema.parse(request.body);
+      const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { slug: true } });
+      reply.send(successResponse(await planDomainSetup(hostname, expectedCnameTarget(tenant.slug)), request.id));
+    }
+  );
+
+  app.get(
+    "/:domainId/setup",
+    { config: { audience: "staff" as const }, preHandler: [...preHandler, requirePermission("settings.manage")] },
+    async (request, reply) => {
+      const tenantId = requireTenant(request.user!.tenantId);
+      const { domainId } = idParamsSchema.parse(request.params);
+      const domain = await getDomainOrThrow(tenantId, domainId);
+      const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { slug: true } });
+      reply.send(successResponse(await planDomainSetup(domain.hostname, expectedCnameTarget(tenant.slug)), request.id));
     }
   );
 
@@ -97,7 +122,11 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
         userAgent: request.headers["user-agent"] ?? null,
       });
 
-      reply.status(201).send(successResponse(domain, request.id));
+      // Already pointing at us (a re-add, or DNS set up first)? Then it's live straight away.
+      const checked = await verifyDomain(domain.id).catch(() => domain);
+      const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { slug: true } });
+      const setup = await planDomainSetup(hostname, expectedCnameTarget(tenant.slug)).catch(() => null);
+      reply.status(201).send(successResponse({ ...checked, setup }, request.id));
     }
   );
 
@@ -112,37 +141,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
       const tenantId = requireTenant(request.user!.tenantId);
       const { domainId } = idParamsSchema.parse(request.params);
       const domain = await getDomainOrThrow(tenantId, domainId);
-      const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-
-      const expectedTarget = normalizeHostname(expectedCnameTarget(tenant.slug));
-      let status: "VERIFIED" | "DNS_ERROR";
-      let lastError: string | null;
-
-      try {
-        const records = await resolveCname(domain.hostname);
-        const matched = records.some((record) => normalizeHostname(record) === expectedTarget);
-        if (matched) {
-          status = "VERIFIED";
-          lastError = null;
-        } else {
-          status = "DNS_ERROR";
-          lastError = `Found a CNAME pointing to "${records.join(", ")}", but expected "${expectedTarget}"`;
-        }
-      } catch (err) {
-        status = "DNS_ERROR";
-        const reason = err instanceof Error ? err.message : String(err);
-        lastError = `No CNAME record found for "${domain.hostname}": ${reason}`;
-      }
-
-      const updated = await prisma.domain.update({
-        where: { id: domain.id },
-        data: {
-          status,
-          lastError,
-          lastCheckedAt: new Date(),
-          verifiedAt: status === "VERIFIED" ? new Date() : domain.verifiedAt,
-        },
-      });
+      const updated = await verifyDomain(domain.id);
 
       await writeAuditLog({
         tenantId,
