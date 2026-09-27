@@ -22,6 +22,8 @@ export interface PortalStrings {
   callForHelp: (phone: string) => string;
   alreadyHaveAccess: string;
   enterVoucher: string;
+  /** The voucher button in the portal's bottom bar, where space is short. */
+  voucherShort: string;
   accountLogin: string;
   paidNotConnected: string;
   paidNotConnectedShort: string;
@@ -117,6 +119,7 @@ const EN: PortalStrings = {
   callForHelp: (phone) => ` Call ${phone} for help.`,
   alreadyHaveAccess: "Already have access?",
   enterVoucher: "Enter voucher",
+  voucherShort: "Voucher",
   accountLogin: "Account login",
   paidNotConnected: "Paid but not connected? Get connected",
   paidNotConnectedShort: "Paid but not connected?",
@@ -212,6 +215,7 @@ const SW: PortalStrings = {
   callForHelp: (phone) => ` Piga ${phone} kwa msaada.`,
   alreadyHaveAccess: "Tayari una kifurushi?",
   enterVoucher: "Weka vocha",
+  voucherShort: "Vocha",
   accountLogin: "Ingia na akaunti",
   paidNotConnected: "Umelipa lakini hujaunganishwa? Unganishwa",
   paidNotConnectedShort: "Umelipa lakini hujaunganishwa?",

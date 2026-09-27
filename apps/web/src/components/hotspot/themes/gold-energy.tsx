@@ -606,8 +606,9 @@ export function GoldEnergyTheme({
         )}
       </div>
 
-      {/* Floating Bottom Quick Action Bar matching Screenshot */}
-      <div className="fixed bottom-0 inset-x-0 z-40 bg-slate-950/90 border-t border-slate-800/80 px-4 py-2.5 backdrop-blur-lg flex items-center justify-between max-w-lg mx-auto">
+      {/* Quick actions, at the end of the page rather than fixed to the bottom: the portal's own
+          bottom bar (paid but not connected, voucher, help) sits there and covered this one. */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800/80 bg-slate-950/90 px-4 py-2.5 max-w-lg mx-auto">
         <button
           type="button"
           onClick={onOpenAccountModal}
@@ -615,6 +616,19 @@ export function GoldEnergyTheme({
         >
           <RefreshIcon className="w-3.5 h-3.5" />
           <span>{t.accountLogin}</span>
+        </button>
+
+        {/* Customers who were given a voucher code (bought from an agent, or sent by SMS) enter it here. */}
+        <button
+          type="button"
+          onClick={onOpenVoucherModal}
+          className="flex items-center gap-1.5 rounded-full border border-amber-400/60 px-3 py-1.5 text-xs font-black text-amber-300 hover:bg-amber-400/10 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M3 9a2 2 0 0 0 0 6v3a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-3a2 2 0 0 0 0-6V6a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1z" />
+            <path d="M13 5v2M13 11v2M13 17v2" />
+          </svg>
+          <span>{t.enterVoucher}</span>
         </button>
 
         <button
