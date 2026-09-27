@@ -296,10 +296,10 @@ export type DomainCheck = { ok: true; via: "CNAME" | "A" } | { ok: false; reason
 export async function checkDomainPointsTo(
   hostname: string,
   target: string,
-  dns: { cname?: typeof resolveCname; a?: typeof resolve4 } = {}
+  dns: { cname?: (name: string) => Promise<string[]>; a?: (name: string) => Promise<string[]> } = {}
 ): Promise<DomainCheck> {
-  const cname = dns.cname ?? resolveCname;
-  const a = dns.a ?? resolve4;
+  const cname = dns.cname ?? ((n: string) => resolveCname(n));
+  const a = dns.a ?? ((n: string) => resolve4(n));
   const norm = (h: string) => h.toLowerCase().replace(/\.$/, "");
   let cnames: string[] = [];
   try {
