@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
 import { pageStrings } from "@/lib/page-strings";
@@ -187,19 +187,47 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
   ];
 
   const isActive = (href: string) => pathname === href;
+  const visibleItems = groups.flatMap((g) => g.items.filter((i) => i.show));
+
+  // Phones: the section list is one scrollable row, so the page itself starts near the top
+  // instead of under a screen-long menu. The current section is scrolled into view.
+  const activeChip = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    activeChip.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [pathname]);
 
   return (
-    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-      <aside className="shrink-0 lg:w-64">
-        <div className="mb-4">
-          <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+      <aside className="min-w-0 shrink-0 lg:w-64">
+        <div className="mb-3 lg:mb-4">
+          <h1 className="flex items-center gap-2.5 text-xl font-bold tracking-tight text-slate-900 dark:text-white lg:text-2xl">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/15 text-brand-600 dark:text-brand-400">
               <IconMaintenance size={18} />
             </span>
             {t.heading}
           </h1>
         </div>
-        <nav className="space-y-5">
+        <nav aria-label={t.heading} className="-mx-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:-mx-6 sm:px-6 lg:hidden">
+          <div className="flex w-max gap-2">
+            {visibleItems.map((item) => (
+              <Link
+                key={item.href}
+                ref={isActive(item.href) ? activeChip : undefined}
+                href={item.href}
+                aria-current={isActive(item.href) ? "page" : undefined}
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm ${
+                  isActive(item.href)
+                    ? "border-brand-500 bg-brand-50 font-semibold text-brand-700 dark:bg-brand-950/70 dark:text-brand-300"
+                    : "border-slate-200 text-slate-600 dark:border-obsidian-700 dark:text-slate-300"
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </nav>
+        <nav className="hidden space-y-5 lg:block">
           {groups.map((group) => {
             const visible = group.items.filter((item) => item.show);
             if (visible.length === 0) return null;

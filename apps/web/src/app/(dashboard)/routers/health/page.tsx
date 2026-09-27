@@ -129,11 +129,11 @@ export default function RouterHealthPage() {
           {!series?.points.length ? (
             <EmptyState title={tr("No readings yet")}>{tr("The first reading appears within 5 minutes of the router coming online.")}</EmptyState>
           ) : (
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               {charts.map((c) => {
                 const pts = series.points.filter((p) => p[c.key] !== null).map((p) => ({ date: label(p.at), value: p[c.key] as number }));
                 return (
-                  <div key={c.key}>
+                  <div key={c.key} className="min-w-0">
                     <p className="mb-1 text-sm font-medium text-white">{c.title}</p>
                     {pts.length === 0 ? (
                       <p className="py-8 text-center text-sm text-slate-400">{c.key === "temperature" ? tr("This router has no temperature sensor.") : tr("No readings yet")}</p>

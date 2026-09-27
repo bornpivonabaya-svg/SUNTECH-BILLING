@@ -72,7 +72,7 @@ export default function LiveChatSettingsPage() {
         <h2 className="mb-2 font-semibold text-slate-900 dark:text-white">{tr("Tawk.to widget ID")}</h2>
         <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
           From your Tawk.to dashboard → Administration → Chat Widget → the embed code has a line like{" "}
-          <span className="font-mono">src=&apos;https://embed.tawk.to/&lt;PROPERTY_ID&gt;/&lt;WIDGET_ID&gt;&apos;</span> —
+          <span className="break-all font-mono">src=&apos;https://embed.tawk.to/&lt;PROPERTY_ID&gt;/&lt;WIDGET_ID&gt;&apos;</span> —
           paste just the <span className="font-mono">PROPERTY_ID/WIDGET_ID</span> part below.
         </p>
         <form
