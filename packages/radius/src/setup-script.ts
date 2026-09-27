@@ -356,7 +356,14 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
     activeHotspotPorts = ["ether2", "ether3"];
   }
 
-  const bridgePortLines = activeHotspotPorts
+  // Always bridge wireless radios (wlan1, wifi1) if present and not assigned to LAN / PPPoE
+  const wirelessInterfaces = ["wlan1", "wifi1"].filter(
+    (w) => w !== lanPort && w !== pppoeIface && !activeHotspotPorts.includes(w)
+  );
+
+  const allBridgePorts = [...activeHotspotPorts, ...wirelessInterfaces];
+
+  const bridgePortLines = allBridgePorts
     .map((port) => `:do {/interface bridge port add bridge=bridge interface=${port}} on-error={}`)
     .join("\n");
 
@@ -425,7 +432,9 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ppp aaa set use-radius=yes accounting=yes interim-update=1m} on-error={}
 # login-by=mac first: a phone that has paid is logged straight back in by the RADIUS server
 # (findMacLogin) when it reconnects, without seeing the sign-in page at all.
-:do {/ip hotspot profile set [find default=yes] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
+:do {/ip hotspot profile set [find] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
+:do {/ip hotspot set [find interface=bridge] profile=default disabled=no} on-error={}
+:do {/ip hotspot reset-html} on-error={}
 :do {/ip hotspot user profile set [find default=yes] shared-users=1} on-error={}
 :do {/ip hotspot remove [find name=mkg-hotspot]} on-error={}
 :do {/ip hotspot add name=mkg-hotspot interface=bridge address-pool=default-dhcp profile=default disabled=no} on-error={}
@@ -433,12 +442,14 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}
+:do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
+:do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}
 
 # Self-repair for the branded login page: if hotspot/login.html is ever missing (a setup cut short,
 # a reset of the hotspot folder), customers get MikroTik's stock sign-in page instead of the portal.
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
-:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}; :if ([:len [/file find name=\\"hotspot/alogin.html\\"]] = 0) do={:do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
+:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0 && [:len [/file find name=\\"flash/hotspot/login.html\\"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
 # Persistent check-in, once a minute. It fetches the platform's small report script into memory
 # (never onto flash) and runs it: CPU, memory, disk, temperature, uptime, users — see
@@ -498,9 +509,31 @@ function heartbeatOnEvent(callbackUrl: string): string {
  * as may the hotspot user count on a router with no hotspot. Kept well under the 4 KB a v6
  * `fetch output=user` returns.
  */
-export function buildHeartbeatScript(callbackUrl: string): string {
+export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string): string {
   const get = (field: string) => `[/system resource get ${field}]`;
+  const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
+  const portalSelfRepair = loginTemplateUrl
+    ? `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; ${aloginTemplateUrl ? `:do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}; ` : ""}};`
+    : `:if ([:len [/file find name="hotspot/login.html"]] = 0 && [:len [/file find name="flash/hotspot/login.html"]] = 0) do={:do {/ip hotspot reset-html} on-error={}};`;
   return [
+    `{`,
+    // Self-repair, each change made only when something is actually wrong, so a healthy router
+    // writes nothing every minute. Radio commands go through deferred(): a router without that
+    // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
+    deferred(`/interface bridge port add bridge=bridge interface=wlan1`),
+    deferred(`/interface bridge port add bridge=bridge interface=wifi1`),
+    deferred(`/interface wireless set [find name=wlan1 disabled=yes] disabled=no mode=ap-bridge`),
+    deferred(`/interface wifi set [find default-name=wifi1 disabled=yes] disabled=no configuration.mode=ap`),
+    `:do {:if ([/ip dns get allow-remote-requests] = false) do={/ip dns set allow-remote-requests=yes}} on-error={}`,
+    `:do {:if ([:len [/ip dns get servers]] = 0) do={/ip dns set servers=1.1.1.1,8.8.8.8}} on-error={}`,
+    // Customers' DNS goes to the router (a phone with a hard-coded 8.8.8.8 otherwise never sees
+    // the sign-in page). Exactly one pair of rules: any other count — none, or the duplicates an
+    // earlier version added every minute — is cleared and replaced.
+    `:do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]; /ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"; /ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"}} on-error={}`,
+    // Every hotspot profile: RADIUS on, and pointed at a folder that really has the sign-in page.
+    `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; :if ([:len [/file find name=($dir . "/login.html")]] = 0) do={:if ([:len [/file find name="flash/hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=flash/hotspot} else={:if ([:len [/file find name="hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=hotspot}}}; :if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`,
+    `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
+    portalSelfRepair,
     // cpu-load is the last second's load, and this runs straight after the router fetched it over
     // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
     `:delay 3s`,
@@ -511,6 +544,7 @@ export function buildHeartbeatScript(callbackUrl: string): string {
     // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
     `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
     `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
+    `}`,
     "",
   ].join("\n");
 }
