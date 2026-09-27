@@ -57,6 +57,7 @@ export interface CreateVlanInput {
   downloadKbps?: number | null;
   uploadKbps?: number | null;
   mtu?: number | null;
+  trunkInterface?: string | null;
   isEnabled?: boolean;
   oltDeviceRef?: string | null;
   ponPort?: string | null;
@@ -189,6 +190,7 @@ export async function createVlan(tenantId: string, input: CreateVlanInput): Prom
       downloadKbps: input.downloadKbps ?? null,
       uploadKbps: input.uploadKbps ?? null,
       mtu: input.mtu ?? null,
+      trunkInterface: input.trunkInterface?.trim() || null,
       isEnabled: input.isEnabled ?? true,
       oltDeviceRef: input.oltDeviceRef ?? null,
       ponPort: input.ponPort ?? null,
@@ -233,6 +235,7 @@ export async function updateVlan(tenantId: string, vlanId: string, patch: Update
       ...(patch.downloadKbps !== undefined ? { downloadKbps: patch.downloadKbps } : {}),
       ...(patch.uploadKbps !== undefined ? { uploadKbps: patch.uploadKbps } : {}),
       ...(patch.mtu !== undefined ? { mtu: patch.mtu } : {}),
+      ...(patch.trunkInterface !== undefined ? { trunkInterface: patch.trunkInterface?.trim() || null } : {}),
       ...(patch.isEnabled !== undefined ? { isEnabled: patch.isEnabled } : {}),
       ...(patch.oltDeviceRef !== undefined ? { oltDeviceRef: patch.oltDeviceRef } : {}),
       ...(patch.ponPort !== undefined ? { ponPort: patch.ponPort } : {}),

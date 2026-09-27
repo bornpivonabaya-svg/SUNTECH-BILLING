@@ -24,6 +24,7 @@ interface VlanRow {
   subnetCidr: string | null;
   gateway: string | null;
   router: { id: string; name: string } | null;
+  trunkInterface: string | null;
 }
 
 const S = {
@@ -66,6 +67,10 @@ const S = {
     pppPorts: "PPPoE access ports",
     portsHint: "Comma-separated, e.g. ether2,ether3,ether4",
     switchNote: "vlan-filtering is switched on last: turning it on before the VLAN table is filled cuts you off. On a CRS3xx this runs in hardware; on a hAP used as a switch it runs on the CPU, which is fine for a few hundred customers.",
+    autoTitle: "The router part is automatic",
+    auto: "Create the VLAN on the VLANs page with its router, type (Hotspot or Internet) and subnet. The platform connects to the router and sets it up for you: VLAN interface on a free port, addresses, DHCP, and its own hotspot or PPPoE server. If the router is offline it finishes when the router is back. The script below is only for a router the platform can't reach.",
+    applyNow: "Set it up on the router for me",
+    applying: "Setting up…",
     routerTitle: "3. Set up the router, one VLAN at a time",
     routerLead: "Pick one of your VLANs (or type the values), choose what runs on it, and paste the script into the router's terminal. Run it once per VLAN: once for the hotspot VLAN, once for the PPPoE VLAN.",
     fromVlan: "Fill from a VLAN",
@@ -154,6 +159,10 @@ const S = {
     pppPorts: "Milango ya kufikia ya PPPoE",
     portsHint: "Tenganisha kwa koma, k.m. ether2,ether3,ether4",
     switchNote: "vlan-filtering inawashwa mwisho: kuiwasha kabla jedwali la VLAN halijajazwa kunakukata. Kwenye CRS3xx inaendeshwa na vifaa; kwenye hAP inayotumika kama swichi inaendeshwa na CPU, jambo ambalo linatosha kwa wateja mia chache.",
+    autoTitle: "Sehemu ya ruta ni ya kiotomatiki",
+    auto: "Unda VLAN kwenye ukurasa wa VLAN pamoja na ruta yake, aina (Hotspot au Intaneti) na subnet. Jukwaa linaunganisha na ruta na kukusanidi: kiolesura cha VLAN kwenye mlango ulio huru, anwani, DHCP, na seva yake ya hotspot au PPPoE. Ruta ikiwa nje ya mtandao, inamaliza ruta inaporudi. Skripti iliyo hapa chini ni kwa ruta ambayo jukwaa haliwezi kuifikia tu.",
+    applyNow: "Nisanidie kwenye ruta",
+    applying: "Inasanidi…",
     routerTitle: "3. Sanidi ruta, VLAN moja kwa wakati",
     routerLead: "Chagua moja ya VLAN zako (au andika thamani), chagua kinachoendeshwa juu yake, na ubandike skripti kwenye terminal ya ruta. Iendeshe mara moja kwa kila VLAN: mara moja kwa VLAN ya hotspot, mara moja kwa VLAN ya PPPoE.",
     fromVlan: "Jaza kutoka VLAN",
@@ -282,7 +291,13 @@ export default function VlanGuidePage() {
   const [service, setService] = useState<Service>("hotspot");
   const [tag, setTag] = useState("20");
   const [name, setName] = useState("");
-  const [trunk, setTrunk] = useState("ether5");
+  const [trunk, setTrunkValue] = useState("ether5");
+  // Only a port the ISP typed is sent with "set it up for me"; otherwise the router detects it.
+  const [trunkTouched, setTrunkTouched] = useState(false);
+  const setTrunk = (v: string) => {
+    setTrunkValue(v);
+    setTrunkTouched(true);
+  };
   const [subnet, setSubnet] = useState("10.20.0.0/22");
   const [gateway, setGateway] = useState("");
   const [dns, setDns] = useState("");
@@ -309,6 +324,8 @@ export default function VlanGuidePage() {
     setName(v.name);
     setSubnet(v.subnetCidr ?? "");
     setGateway(v.gateway ?? "");
+    setTrunkValue(v.trunkInterface ?? "ether5");
+    setTrunkTouched(false);
     const svc: Service = v.type === "HOTSPOT" || v.type === "GUEST" ? "hotspot" : "pppoe";
     setService(svc);
     if (svc === "hotspot") setHsTag(String(v.vlanTag));
@@ -330,6 +347,11 @@ export default function VlanGuidePage() {
         }),
       }),
     onSuccess: (r) => setScript({ script: r.script, tag: Number(tag), service }),
+  });
+
+  const selected = vlans?.find((v) => v.id === vlanId) ?? null;
+  const apply = useMutation({
+    mutationFn: () => apiFetch<{ status: string; message: string }>(`/api/v1/vlans/${vlanId}/apply`, { method: "POST", body: JSON.stringify({ trunkInterface: trunkTouched ? trunk.trim() || null : null }) }),
   });
 
   const field = (id: string, label: string, value: string, set: (v: string) => void, hint?: string, placeholder?: string) => (
@@ -377,6 +399,13 @@ export default function VlanGuidePage() {
           <p className="text-xs text-slate-500">{t.switchNote}</p>
         </div>
       </Panel>
+
+      <Notice tone="good">
+        <span className="font-semibold">{t.autoTitle}.</span> {t.auto}{" "}
+        <Link href="/vlans" className="underline">
+          {t.back}
+        </Link>
+      </Notice>
 
       <Panel title={t.routerTitle} description={t.routerLead}>
         <form
@@ -438,9 +467,18 @@ export default function VlanGuidePage() {
             {field("g-gw", t.gateway, gateway, setGateway, t.gatewayHint)}
             {field("g-dns", t.dns, dns, setDns, undefined, "1.1.1.1, 8.8.8.8")}
           </div>
-          <button type="submit" className={darkButton("primary", "sm")} disabled={make.isPending || !tag || !subnet || !trunk}>
-            {make.isPending ? t.making : t.generate}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {mode === "record" && selected?.router && (
+              <button type="button" className={darkButton("primary", "sm")} disabled={apply.isPending} onClick={() => apply.mutate()}>
+                {apply.isPending ? t.applying : t.applyNow}
+              </button>
+            )}
+            <button type="submit" className={darkButton("secondary", "sm")} disabled={make.isPending || !tag || !subnet || !trunk}>
+              {make.isPending ? t.making : t.generate}
+            </button>
+          </div>
+          {apply.data && <Notice tone={apply.data.status === "ACTIVE" ? "good" : apply.data.status === "PENDING" ? "warn" : "bad"}>{apply.data.message}</Notice>}
+          {apply.isError && <Notice tone="bad">{apply.error instanceof ApiRequestError ? apply.error.message : String(apply.error)}</Notice>}
           {make.isError && <Notice tone="bad">{make.error instanceof ApiRequestError ? make.error.message : String(make.error)}</Notice>}
           {script && <CodeBlock code={script.script} label={t.scriptLabel(script.tag, script.service)} maxHeight="24rem" />}
         </form>

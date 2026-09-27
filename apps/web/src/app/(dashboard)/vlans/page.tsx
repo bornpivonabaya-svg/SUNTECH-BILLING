@@ -54,6 +54,7 @@ interface Vlan {
   isEnabled: boolean;
   provisioningStatus: "NOT_PROVISIONED" | "PENDING" | "ACTIVE" | "FAILED";
   lastProvisioningError: string | null;
+  trunkInterface?: string | null;
   packageCount: number;
 }
 
@@ -107,6 +108,8 @@ export default function VlansPage() {
   const [routerId, setRouterId] = useState("");
   const [subnetCidr, setSubnetCidr] = useState("");
   const [gateway, setGateway] = useState("");
+  const [trunkInterface, setTrunkInterface] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
 
   const filterQuery = new URLSearchParams();
   if (search.trim()) filterQuery.set("search", search.trim());
@@ -144,9 +147,12 @@ export default function VlansPage() {
           routerId: routerId || undefined,
           subnetCidr: subnetCidr || undefined,
           gateway: gateway || undefined,
+          trunkInterface: trunkInterface.trim() || undefined,
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      const setup = (created as { routerSetup?: { message: string } | null }).routerSetup;
+      setNotice(setup ? setup.message : null);
       setVlanTag("");
       setName("");
       setSubnetCidr("");
@@ -157,6 +163,17 @@ export default function VlansPage() {
       refresh();
     },
     onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to create VLAN"),
+  });
+
+  // One click: the platform connects to the router and sets the VLAN's hotspot or PPPoE up.
+  const applyToRouter = useMutation({
+    mutationFn: (v: Vlan) => apiFetch<{ status: string; message: string }>(`/api/v1/vlans/${v.id}/apply`, { method: "POST", body: "{}" }),
+    onSuccess: (r) => {
+      setNotice(r.message);
+      setError(null);
+      refresh();
+    },
+    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to set up VLAN on the router"),
   });
 
   const toggleEnabled = useMutation({
@@ -207,6 +224,12 @@ export default function VlansPage() {
           subtitle={overview?.provisioningFailed ? "Needs attention" : undefined}
         />
       </div>
+
+      {notice && (
+        <Card>
+          <p className="text-sm text-emerald-700 dark:text-emerald-400">{notice}</p>
+        </Card>
+      )}
 
       {error && (
         <Card>
@@ -306,7 +329,15 @@ export default function VlansPage() {
                 <Label htmlFor="gw">Gateway (optional)</Label>
                 <Input id="gw" value={gateway} onChange={(e) => setGateway(e.target.value)} placeholder="10.20.0.1" />
               </div>
+              <div>
+                <Label htmlFor="trunk">{tr("Trunk port (optional)")}</Label>
+                <Input id="trunk" value={trunkInterface} onChange={(e) => setTrunkInterface(e.target.value)} placeholder="ether5" />
+                <HintText>{tr("The router port your switch is plugged into. Leave empty and it's detected on the router.")}</HintText>
+              </div>
             </div>
+            <HintText>
+              {tr("Hotspot, guest and internet (PPPoE) VLANs with a router and a subnet are set up on the router automatically: VLAN interface, addresses, and its own hotspot or PPPoE server. An offline router gets it as soon as it's back.")}
+            </HintText>
             <Button type="submit" disabled={createVlan.isPending}>
               {createVlan.isPending ? "Creating…" : "Create VLAN"}
             </Button>
@@ -409,6 +440,8 @@ export default function VlansPage() {
                     </td>
                     <td className="py-3 pr-3">
                       <DeviceStatusBadge vlan={v} />
+                      {v.provisioningStatus === "ACTIVE" && v.trunkInterface && <p className="mt-1 text-xs text-slate-500">{tr("via")} {v.trunkInterface}</p>}
+                      {v.provisioningStatus === "PENDING" && v.lastProvisioningError && <p className="mt-1 max-w-xs text-xs text-amber-600 dark:text-amber-400">{v.lastProvisioningError}</p>}
                       {v.provisioningStatus === "FAILED" && v.lastProvisioningError && (
                         <p className="mt-1 max-w-xs text-xs text-rose-600 dark:text-rose-400">
                           {v.lastProvisioningError}
@@ -416,7 +449,12 @@ export default function VlansPage() {
                       )}
                     </td>
                     <td className="py-3">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {v.router && ["HOTSPOT", "GUEST", "CUSTOMER_INTERNET", "BUSINESS_INTERNET"].includes(v.type) && (
+                          <Button variant="secondary" onClick={() => applyToRouter.mutate(v)} disabled={applyToRouter.isPending}>
+                            {applyToRouter.isPending && applyToRouter.variables?.id === v.id ? tr("Setting up…") : v.provisioningStatus === "ACTIVE" ? tr("Set up again") : tr("Set up on router")}
+                          </Button>
+                        )}
                         <Button
                           variant="secondary"
                           onClick={() => toggleEnabled.mutate(v)}

@@ -132,6 +132,16 @@ export const AUTOMATION_JOBS: readonly AutomationJobDefinition[] = [
     tenantVisible: true,
   },
   {
+    name: JOB_NAMES.retryPendingVlans,
+    queue: QUEUE_NAMES.network,
+    category: "network",
+    label: "Finish VLAN setup",
+    description: "Sets up hotspot and PPPoE VLANs on routers that were offline when the VLAN was added.",
+    everyMs: 5 * MINUTE,
+    counters: { applied: "Set up", waiting: "Router still offline", failed: "Failed" },
+    tenantVisible: true,
+  },
+  {
     name: JOB_NAMES.pollRouterHealth,
     queue: QUEUE_NAMES.network,
     category: "network",

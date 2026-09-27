@@ -2424,9 +2424,12 @@ model Vlan {
   ipPool     IPPool?  @relation(fields: [ipPoolId], references: [id], onDelete: SetNull)
   dnsServers String[] @default([])
 
-  downloadKbps Int?
-  uploadKbps   Int?
-  mtu          Int?
+  downloadKbps   Int?
+  uploadKbps     Int?
+  mtu            Int?
+  /// The router port the switch trunk is patched into. Detected on the router the first time
+  /// the VLAN is set up there (a free ethernet port that isn't WAN, hotspot or LAN), then kept.
+  trunkInterface String?
 
   /// Whether an administrator has this VLAN switched on in the billing system. Distinct from
   /// provisioningStatus, which reflects the device.
