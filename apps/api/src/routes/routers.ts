@@ -897,6 +897,9 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
   return request.ip;
 }
 
+  // No per-address rate limit on the three /provision routes below: the token is the auth, and a
+  // router shares its public address with every phone and PC behind the same NAT, so their
+  // traffic could otherwise use up the limit and drop its heartbeat (router shows Offline).
   // --- Public callback (the router itself, via /tool fetch in the provisioning script) —
   // audience "system-critical" bypasses maintenance mode (a router mid-provisioning shouldn't
   // silently fail to link just because maintenance mode is on) and carries no staff auth, since
@@ -907,7 +910,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
    * /tool fetch url="https://api.mashuphost.tech/api/v1/routers/provision/<token>/setup.rsc" dst-path=setup.rsc; :delay 2s; /import setup.rsc;
    * Serves the generated .rsc script dynamically to the MikroTik router.
    */
-  app.get("/provision/:token/setup.rsc", { config: { audience: "system-critical" } }, async (request, reply) => {
+  app.get("/provision/:token/setup.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const { token } = provisionCallbackParamsSchema.parse(request.params);
     const router = await prisma.router.findFirst({
       where: { provisionTokenHash: hashToken(token), deletedAt: null },
@@ -971,7 +974,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     reply.header("Content-Type", "text/plain; charset=utf-8").send(script);
   });
 
-  app.get("/provision/:token/callback", { config: { audience: "system-critical" } }, async (request, reply) => {
+  app.get("/provision/:token/callback", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const remoteIp = getClientIp(request);
     reply.status(200).send({
       success: true,
@@ -980,7 +983,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     });
   });
 
-  app.post("/provision/:token/callback", { config: { audience: "system-critical" } }, async (request, reply) => {
+  app.post("/provision/:token/callback", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const { token } = provisionCallbackParamsSchema.parse(request.params);
     const remoteIp = getClientIp(request);
     const query = (request.query as Record<string, unknown>) || {};

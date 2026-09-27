@@ -983,17 +983,16 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
       const receipt = body.mpesaMessage?.toUpperCase().match(/\b[A-Z0-9]{10}\b/)?.[0];
       const phone = body.phone ? normalizeKenyanPhone(body.phone) : undefined;
 
-      let stkRequest = await prisma.mpesaStkRequest.findFirst({
-        where: {
-          tenantId: tenant.id,
-          status: "COMPLETED",
-          hotspotVoucherCode: { not: null },
-          createdAt: { gte: since },
-          ...(receipt ? { mpesaReceiptNumber: receipt } : { phone }),
-        },
-        orderBy: { createdAt: "desc" },
-        select: { hotspotVoucherCode: true, mpesaReceiptNumber: true, createdAt: true },
-      });
+      const findCompleted = (match: { mpesaReceiptNumber: string } | { phone: string }) =>
+        prisma.mpesaStkRequest.findFirst({
+          where: { tenantId: tenant.id, status: "COMPLETED", hotspotVoucherCode: { not: null }, createdAt: { gte: since }, ...match },
+          orderBy: { createdAt: "desc" },
+          select: { hotspotVoucherCode: true, mpesaReceiptNumber: true, createdAt: true },
+        });
+      // The receipt first; then the phone number, which also covers a receipt misread from a
+      // pasted message or a customer who gave both.
+      let stkRequest = receipt ? await findCompleted({ mpesaReceiptNumber: receipt }) : null;
+      if (!stkRequest && phone) stkRequest = await findCompleted({ phone });
 
       // If not yet completed, check if there is a recent PENDING request for this phone.
       // Defensively live-query Safaricom right now to reconcile it on-demand!
