@@ -509,7 +509,7 @@ function heartbeatOnEvent(callbackUrl: string): string {
  * as may the hotspot user count on a router with no hotspot. Kept well under the 4 KB a v6
  * `fetch output=user` returns.
  */
-export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string): string {
+export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string, options: { hotspotCheck?: boolean } = {}): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
   const portalSelfRepair = loginTemplateUrl
@@ -543,11 +543,23 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // The management VPN (RouterOS 7): whether mkg-wg exists, and how long since its last
     // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
     `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
+    ...(options.hotspotCheck === false ? [] : [HOTSPOT_CHECK]),
     `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
     `}`,
     "",
   ].join("\n");
 }
+
+/**
+ * The router checks its own hotspot every minute and reports counts, so the dashboard can say in
+ * plain words why customers get "Connected, no internet" (see hotspotProblems in
+ * @mashupkgrid/network) without anyone typing router commands: running hotspot servers, phones
+ * that reached the hotspot (hosts) and signed in (auth), DHCP leases, the DNS redirect rules,
+ * sign-in page files, radios in the bridge, the portal in the walled garden, pings answered by
+ * the internet, and whether DNS resolves. Left out for RouterOS 6, whose report must stay under
+ * the 4 KB its fetch returns.
+ */
+const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find dst-host~"mashuphost"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :set d ($d . "&hs=" . $c)} on-error={}`;
 
 /** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */
 export function aloginUrlFor(loginTemplateUrl: string): string {

@@ -23,6 +23,64 @@ export interface RouterHeartbeatMetrics {
   /** The management VPN as the router reports it; see parseVpnReport. */
   vpnStatus?: "none" | "no-peer" | "waiting" | "connected";
   vpnHandshakeAt?: Date;
+  /** The router's hotspot self-check; see parseHotspotCheck and hotspotProblems. */
+  hotspotCheck?: HotspotCheck;
+  hotspotCheckAt?: Date;
+}
+
+/** Counts from the router's hotspot self-check (HOTSPOT_CHECK in @mashupkgrid/radius). */
+export interface HotspotCheck {
+  srv?: number; // hotspot servers running
+  hosts?: number; // devices that reached the hotspot
+  auth?: number; // of those, signed in
+  leases?: number; // DHCP leases handed out
+  dnsnat?: number; // "MASHUPKGRID DNS" redirect rules
+  login?: number; // hotspot/login.html files
+  radios?: number; // wlan/wifi interfaces in the bridge
+  garden?: number; // walled-garden entries for the platform
+  ping?: number; // of 2 pings to 8.8.8.8, answered
+  dns?: number; // 1 when the router resolves names
+}
+
+const CHECK_KEYS: (keyof HotspotCheck)[] = ["srv", "hosts", "auth", "leases", "dnsnat", "login", "radios", "garden", "ping", "dns"];
+
+/** "srv=1;hosts=3;…;dns=1" → counts; unknown keys and non-numbers are dropped. */
+export function parseHotspotCheck(value: string | null): HotspotCheck | undefined {
+  if (!value) return undefined;
+  const check: HotspotCheck = {};
+  for (const part of value.slice(0, 500).split(";")) {
+    const [key, raw] = part.split("=", 2) as [string, string | undefined];
+    const n = Number(raw);
+    if (CHECK_KEYS.includes(key as keyof HotspotCheck) && raw !== undefined && raw !== "" && Number.isInteger(n) && n >= 0 && n < 1_000_000) {
+      check[key as keyof HotspotCheck] = n;
+    }
+  }
+  return Object.keys(check).length ? check : undefined;
+}
+
+export interface HotspotProblem {
+  code: string;
+  /** What is wrong, in words an ISP can act on. */
+  message: string;
+}
+
+/**
+ * Why customers would see "Connected, no internet" or no sign-in page, from the router's own
+ * check. Ordered by cause: a router with no internet explains everything after it.
+ */
+export function hotspotProblems(check: HotspotCheck | null | undefined): HotspotProblem[] {
+  if (!check) return [];
+  const out: HotspotProblem[] = [];
+  if (check.ping === 0) out.push({ code: "no-internet", message: "The router itself has no internet: its WAN (ether1) link or the upstream modem is down." });
+  if (check.dns === 0) out.push({ code: "no-dns", message: "The router can't look up names (DNS), so the sign-in page and every website fail." });
+  if (check.srv === 0) out.push({ code: "no-hotspot", message: "No hotspot server is running on the router, so phones never get the sign-in page." });
+  if (check.login === 0) out.push({ code: "no-login-page", message: "The sign-in page file (hotspot/login.html) is missing on the router." });
+  if (check.radios === 0) out.push({ code: "wifi-not-bridged", message: "The Wi-Fi isn't part of the hotspot bridge, so Wi-Fi phones bypass the hotspot." });
+  if (check.garden === 0) out.push({ code: "no-walled-garden", message: "The payment portal isn't in the walled garden, so the sign-in page can't open." });
+  if (check.dnsnat !== undefined && check.dnsnat > 2) out.push({ code: "dns-rules-piled", message: `${check.dnsnat} copies of the DNS redirect rule (should be 2) are slowing the router.` });
+  if (check.leases !== undefined && check.leases > 0 && check.hosts === 0 && check.srv !== 0)
+    out.push({ code: "hosts-bypass", message: "Phones get an address but never reach the hotspot: it runs on a different port than the Wi-Fi." });
+  return out;
 }
 
 /**
@@ -135,6 +193,11 @@ export function parseHeartbeatReport(body: string, query: Record<string, unknown
   }
 
   Object.assign(metrics, parseVpnReport(get("wg")));
+  const hotspotCheck = parseHotspotCheck(get("hs"));
+  if (hotspotCheck) {
+    metrics.hotspotCheck = hotspotCheck;
+    metrics.hotspotCheckAt = new Date();
+  }
 
   for (const key of Object.keys(metrics) as (keyof RouterHeartbeatMetrics)[]) {
     if (metrics[key] === undefined) delete metrics[key];

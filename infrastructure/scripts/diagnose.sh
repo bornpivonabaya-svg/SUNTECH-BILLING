@@ -85,7 +85,7 @@ sql "SELECT t.slug AS isp, r.name, r.status, r.host, r.\"vpnIp\",
             r.\"cpuLoadPercent\" AS cpu, r.\"temperatureC\" AS temp, r.\"activeUsers\" AS users,
             r.\"routerOsVersion\" AS ros, r.\"boardName\" AS board, r.\"vpnStatus\" AS vpn,
             to_char(r.\"vpnHandshakeAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi','HH24:MI') AS vpn_seen,
-            left(r.\"lastError\", 60) AS last_error
+            r.\"hotspotCheck\"::text AS hotspot_check, left(r.\"lastError\", 60) AS last_error
      FROM routers r JOIN tenants t ON t.id = r.\"tenantId\"
      WHERE r.\"deletedAt\" IS NULL ORDER BY r.\"lastSeenAt\" DESC NULLS LAST LIMIT 20;"
 echo "--- RADIUS clients (routers allowed to ask RADIUS; source address must match the router's public IP)"

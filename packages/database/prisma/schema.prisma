@@ -2044,6 +2044,9 @@ model Router {
   /// "waiting" (never connected) or "connected"; vpnHandshakeAt is its last handshake.
   vpnStatus            String?
   vpnHandshakeAt       DateTime?
+  /// The router's own hotspot self-check from its last report (counts; see hotspotProblems).
+  hotspotCheck         Json?
+  hotspotCheckAt       DateTime?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   deletedAt            DateTime?
