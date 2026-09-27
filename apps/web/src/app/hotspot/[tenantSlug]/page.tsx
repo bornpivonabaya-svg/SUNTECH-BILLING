@@ -219,10 +219,18 @@ export default function HotspotCaptivePortalPage() {
   /** This phone's MAC, put in the sign-in link by the router ($(mac) in the login template). */
   const paramPhoneMac = searchParams.get("mac");
   const paramLinkOrig = searchParams.get("link-orig");
+  const paramRouterError = searchParams.get("error");
 
   const [linkLoginOnly, setLinkLoginOnly] = useState<string | null>(paramLinkLoginOnly);
   const [phoneMac, setPhoneMac] = useState<string | null>(paramPhoneMac);
   const [linkOrig, setLinkOrig] = useState<string | null>(paramLinkOrig);
+
+  useEffect(() => {
+    if (paramRouterError) {
+      const decoded = decodeURIComponent(paramRouterError);
+      setError(decoded);
+    }
+  }, [paramRouterError]);
 
   useEffect(() => {
     if (paramLinkLoginOnly) {
@@ -470,18 +478,25 @@ export default function HotspotCaptivePortalPage() {
     queryFn: () => apiFetch<HotspotPackage[]>(`/api/v1/hotspot/${tenantSlug}/packages`, { skipAuth: true }),
   });
 
+  const [canDisconnectPrevious, setCanDisconnectPrevious] = useState(false);
+  const [pendingVoucherCode, setPendingVoucherCode] = useState<string>("");
+
   const connectWithVoucher = useMutation({
-    mutationFn: (codeToUse?: string) => {
+    mutationFn: (vars?: string | { code?: string; disconnectPrevious?: boolean }) => {
+      const codeToUse = typeof vars === "string" ? vars : vars?.code;
+      const disconnectPrevious = typeof vars === "object" ? vars?.disconnectPrevious : false;
       const finalCode = (codeToUse ?? voucherCode).trim().toUpperCase();
       return apiFetch<VoucherLoginResult>(`/api/v1/hotspot/${tenantSlug}/login`, {
         method: "POST",
         skipAuth: true,
-        body: JSON.stringify({ code: finalCode, mac: phoneMac || undefined }),
+        body: JSON.stringify({ code: finalCode, mac: phoneMac || undefined, disconnectPrevious }),
       });
     },
-    onSuccess: (data, codeToUse) => {
+    onSuccess: (data, vars) => {
       setError(null);
+      setCanDisconnectPrevious(false);
       setAutoReconnecting(false);
+      const codeToUse = typeof vars === "string" ? vars : vars?.code;
       const finalCode = (codeToUse ?? voucherCode).trim().toUpperCase();
       // Remembered *after* a real Access-Accept, not at purchase time — so force-reconnect only
       // ever replays a code the router has actually already accepted once.
@@ -495,10 +510,12 @@ export default function HotspotCaptivePortalPage() {
         setSelectedPkg(null);
       });
     },
-    onError: (err) => {
+    onError: (err, vars) => {
       setVoucherResult(null);
       setAutoReconnecting(false);
       console.error("Voucher error:", err);
+      const codeToUse = typeof vars === "string" ? vars : vars?.code;
+      const finalCode = (codeToUse ?? voucherCode).trim().toUpperCase();
       const message =
         err instanceof ApiRequestError
           ? err.message
@@ -506,9 +523,15 @@ export default function HotspotCaptivePortalPage() {
             ? `Connection error: ${err.message}`
             : "Could not connect — please try again";
       setError(message);
+      if (message.toLowerCase().includes("another session") || message.toLowerCase().includes("another device")) {
+        setCanDisconnectPrevious(true);
+        setPendingVoucherCode(finalCode);
+      }
       // A rejected/expired/used code has nothing left to auto-retry with — keeping it around
       // would just mean the next disconnect silently fails the same way again.
-      if (err instanceof ApiRequestError) forgetRememberedVoucher(tenantSlug);
+      if (err instanceof ApiRequestError && !message.toLowerCase().includes("another")) {
+        forgetRememberedVoucher(tenantSlug);
+      }
     },
   });
 
@@ -523,13 +546,14 @@ export default function HotspotCaptivePortalPage() {
     // Pre-fill the payment number from this device's last purchase. Deliberately does not
     // overwrite anything already typed: this effect also re-runs on tenantSlug changes.
     setBuyPhone((current) => current || loadRememberedPhone(tenantSlug));
+    if (paramRouterError) return;
     if (autoReconnectAttempted.current) return;
     if (!remembered) return;
     autoReconnectAttempted.current = true;
     setAutoReconnecting(true);
     connectWithVoucher.mutate(remembered.code);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantSlug, linkLoginOnly]);
+  }, [tenantSlug, linkLoginOnly, paramRouterError]);
 
   const forceReconnect = () => {
     if (!rememberedVoucher) return;
@@ -934,6 +958,30 @@ export default function HotspotCaptivePortalPage() {
           </PortalSheet>
         )}
 
+        {/* Another device connected warning banner */}
+        {error && canDisconnectPrevious && (
+          <div className="fixed inset-x-4 top-4 z-[999] mx-auto max-w-md rounded-2xl bg-amber-500 p-4 text-white shadow-2xl">
+            <p className="font-semibold text-sm">{error}</p>
+            <p className="mt-1 text-xs text-amber-100">Another device is currently using this voucher. Tap below to disconnect that device and connect this phone.</p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => connectWithVoucher.mutate({ code: pendingVoucherCode || voucherCode, disconnectPrevious: true })}
+                className="flex-1 rounded-xl bg-white px-3 py-2 text-xs font-bold text-amber-900 shadow hover:bg-amber-50"
+              >
+                Disconnect & Connect Here
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCanDisconnectPrevious(false); setError(null); }}
+                className="rounded-xl bg-amber-700/60 px-3 py-2 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Back online in one tap with the still-valid code from last time. */}
         {rememberedVoucher && !completingRouterLogin && (
           <div className="fixed left-1/2 top-3 z-50 -translate-x-1/2">
@@ -1061,6 +1109,13 @@ export default function HotspotCaptivePortalPage() {
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">✓</div>
                 <h2 className="mt-3 text-lg font-semibold text-slate-900">{t.paymentConfirmed}</h2>
                 <p className="mt-1 text-sm text-slate-600">{t.connectingNow}</p>
+                {voucherCode && (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-center">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Your Voucher Code</p>
+                    <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-emerald-950">{voucherCode}</p>
+                    <p className="mt-1 text-xs text-emerald-700">Saved to this device. If your phone doesn't connect automatically, enter this code on the Wi-Fi sign-in screen.</p>
+                  </div>
+                )}
               </div>
             ) : pollingStatus === "PENDING" ? (
               <div className="text-center">
@@ -1242,6 +1297,15 @@ export default function HotspotCaptivePortalPage() {
                 <div className="mt-3">
                   <SheetError>{error}</SheetError>
                 </div>
+              )}
+              {canDisconnectPrevious && (
+                <button
+                  type="button"
+                  onClick={() => connectWithVoucher.mutate({ code: pendingVoucherCode || voucherCode, disconnectPrevious: true })}
+                  className={`${sheetPrimary} mt-3 bg-amber-600 hover:bg-amber-700`}
+                >
+                  Disconnect Previous Device & Connect
+                </button>
               )}
               <button type="submit" disabled={connectWithVoucher.isPending || !voucherCode} className={`${sheetPrimary} mt-4`}>
                 {connectWithVoucher.isPending ? t.connecting : t.connect}

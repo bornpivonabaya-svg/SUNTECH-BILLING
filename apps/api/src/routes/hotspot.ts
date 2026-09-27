@@ -18,7 +18,7 @@ import {
   verifyAndReconcilePesapalTransaction,
 } from "@mashupkgrid/payments";
 import { successResponse, ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@mashupkgrid/shared";
-import { appFilterPortalHosts, buildAppFilterSection, checkMacLogin, rememberDevice } from "@mashupkgrid/network";
+import { appFilterPortalHosts, buildAppFilterSection, checkMacLogin, rememberDevice, sessionNamesForVoucher } from "@mashupkgrid/network";
 import { env } from "@mashupkgrid/config";
 import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
@@ -28,7 +28,11 @@ import { hotspotLoginRateLimitConfig } from "../plugins/rate-limit.js";
 import { resolveTenantBySlug } from "../services/auth.service.js";
 
 const tenantParamsSchema = z.object({ tenantSlug: z.string().min(1) });
-const loginBodySchema = z.object({ code: z.string().min(1).max(32), mac: z.string().max(32).optional() });
+const loginBodySchema = z.object({
+  code: z.string().min(1).max(32),
+  mac: z.string().max(32).optional(),
+  disconnectPrevious: z.boolean().optional(),
+});
 /** Either identifier is accepted: the number they paid from, or the confirmation SMS pasted
  *  whole. Both are things a stranded customer has on their phone right now. */
 const recoverBodySchema = z
@@ -1039,7 +1043,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { tenantSlug } = tenantParamsSchema.parse(request.params);
-      const { code, mac } = loginBodySchema.parse(request.body);
+      const { code, mac, disconnectPrevious } = loginBodySchema.parse(request.body);
       const tenant = await resolveTenantBySlug(tenantSlug);
 
       const voucher = await validateVoucherForLogin(tenant.id, code.trim().toUpperCase());
@@ -1049,6 +1053,34 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
       }
       if (voucher.status === "USED") {
         throw new ConflictError("This voucher has already been used up");
+      }
+
+      const simCheck = await prisma.radCheck.findFirst({
+        where: { username: voucher.code, attribute: "Simultaneous-Use" },
+      });
+      const maxDevices = simCheck ? parseInt(simCheck.value, 10) : (voucher.simultaneousUse || 1);
+
+      if (maxDevices > 0) {
+        const sessionNames = await sessionNamesForVoucher(tenant.id, voucher.code);
+        const otherDevicesActive = await prisma.radAcct.count({
+          where: {
+            username: { in: sessionNames },
+            acctStopTime: null,
+            ...(mac ? { NOT: { callingStationId: mac } } : {}),
+          },
+        });
+        if (otherDevicesActive >= maxDevices) {
+          if (disconnectPrevious) {
+            await prisma.radAcct.updateMany({
+              where: { username: { in: sessionNames }, acctStopTime: null },
+              data: { acctStopTime: new Date(), acctTerminateCause: "User-Request" },
+            });
+          } else {
+            throw new ConflictError(
+              `Another session is already connected using this voucher. Only ${maxDevices} device allowed at a time.`
+            );
+          }
+        }
       }
 
       // If MAC is supplied, immediately bind device and activate the voucher!

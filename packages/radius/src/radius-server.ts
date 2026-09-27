@@ -58,6 +58,7 @@ const ATTR = {
   USER_NAME: 1,
   USER_PASSWORD: 2,
   ACCT_STATUS_TYPE: 40,
+  REPLY_MESSAGE: 18,
   ACCT_INPUT_OCTETS: 42,
   ACCT_OUTPUT_OCTETS: 43,
   ACCT_INPUT_GIGAWORDS: 52,
@@ -590,6 +591,7 @@ export function startRadiusServer(options: { authPort?: number; acctPort?: numbe
         const voucherCode = macLogin?.voucherCode ?? username;
 
         // If credentials are valid, enforce simultaneous active devices limit if configured
+        let rejectReason: string | null = null;
         if (valid) {
           const simCheck = await prisma.radCheck.findFirst({
             where: { username: voucherCode, attribute: "Simultaneous-Use" },
@@ -610,13 +612,18 @@ export function startRadiusServer(options: { authPort?: number; acctPort?: numbe
                   `[radius] device limit reached for "${username}" (${otherDevicesActive}/${maxDevices} active sessions from other devices) — rejecting Access-Request`
                 );
                 valid = false;
+                rejectReason = `Another device is already connected with this voucher (Limit: ${maxDevices} device${maxDevices > 1 ? "s" : ""}).`;
               }
             }
           }
         }
 
         const replyCode = valid ? RADIUS_CODE.ACCESS_ACCEPT : RADIUS_CODE.ACCESS_REJECT;
-        const replyAttributes = valid ? await buildReplyAttributes(voucherCode, macLogin ?? undefined) : [];
+        const replyAttributes = valid
+          ? await buildReplyAttributes(voucherCode, macLogin ?? undefined)
+          : rejectReason
+            ? [{ type: ATTR.REPLY_MESSAGE, value: Buffer.from(rejectReason, "utf8") }]
+            : [];
         // A code login teaches us this phone, so its next reconnect can skip the sign-in page.
         if (valid && !macLogin) {
           rememberDevice(nas.tenantId, callingStationId, username).catch((err) =>

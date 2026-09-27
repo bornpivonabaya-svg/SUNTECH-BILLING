@@ -327,6 +327,7 @@ export function buildMikrotikProvisioningScript(
   // The tenant's own domains come before the gateways so an operator reading the script sees
   // "my portal is reachable" first — that is the entry they most often need to check.
   const walledGardenHosts = [
+    serverHost,
     "captive.mashuphost.tech",
     ...hostWithSubdomains(apiHost),
     ...hostWithSubdomains(portalHost),
