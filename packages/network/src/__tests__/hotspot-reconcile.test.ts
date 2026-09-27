@@ -4,7 +4,10 @@ import { MikroTikAdapter } from "../mikrotik/mikrotik.adapter.js";
 type Row = Record<string, string>;
 
 /** A router as the RouterOS API sees it: files, RADIUS servers, and a record of every write. */
-function fakeRouter(state: { files: string[]; radius: Row[]; walledIp?: Row[]; walledHttp?: Row[]; filters?: Row[] }) {
+/** The anti-tethering rules a correctly set-up router has (packages that ask for it only). */
+const LIST_RULES: Row[] = ["63", "127", "254"].map((t, i) => ({ ".id": `*M${i}`, comment: "MASHUPKGRID ANTI-TETHER", "src-address-list": "mashup-anti-tether", ttl: `equal:${t}` }));
+
+function fakeRouter(state: { files: string[]; radius: Row[]; walledIp?: Row[]; walledHttp?: Row[]; filters?: Row[]; mangles?: Row[] }) {
   const writes: string[][] = [];
   const client = {
     print: vi.fn(async (words: string[]) => {
@@ -13,6 +16,7 @@ function fakeRouter(state: { files: string[]; radius: Row[]; walledIp?: Row[]; w
       if (words[0] === "/ip/hotspot/walled-garden/ip/print") return state.walledIp ?? [];
       if (words[0] === "/ip/hotspot/walled-garden/print") return state.walledHttp ?? [];
       if (words[0] === "/ip/firewall/filter/print") return state.filters ?? [];
+      if (words[0] === "/ip/firewall/mangle/print") return state.mangles ?? LIST_RULES;
       return [];
     }),
     talk: vi.fn(async (words: string[]) => {
@@ -87,6 +91,7 @@ describe("router hotspot self-repair", () => {
         { ".id": "*B", comment: "MASHUPKGRID ANTI-TETHER" },
         { ".id": "*C", comment: "something the operator added" },
       ],
+      mangles: [],
     });
     const changes = await adapter.ensureHotspotProvisioning(opts);
     expect(changes).toContain("moved anti-tethering to prerouting (all hotspot users); phones were being blocked");
@@ -97,5 +102,28 @@ describe("router hotspot self-repair", () => {
     expect(mangles).toHaveLength(6);
     for (const m of mangles) expect(m).toEqual(expect.arrayContaining(["=chain=prerouting", "=action=change-ttl", "=new-ttl=set:1"]));
     expect(mangles.filter((m) => m.includes("=hotspot=auth"))).toHaveLength(3);
+  });
+
+  it("puts the rules back when someone removed them by hand", async () => {
+    const { adapter, writes } = fakeRouter({ files: ["hotspot/login.html", "hotspot/alogin.html"], radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }], mangles: [] });
+    const changes = await adapter.ensureHotspotProvisioning(opts);
+    expect(changes).toEqual(["anti-tethering rules set for packages that ask for it"]);
+    expect(writes.filter((w) => w[0] === "/ip/firewall/mangle/add")).toHaveLength(3);
+  });
+
+  it("follows the router's block-tethering switch, both ways", async () => {
+    const on = fakeRouter({ files: ["hotspot/login.html", "hotspot/alogin.html"], radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }] });
+    expect(await on.adapter.ensureHotspotProvisioning({ ...opts, blockTethering: true })).toEqual(["anti-tethering rules set for all hotspot users"]);
+    const added = on.writes.filter((w) => w[0] === "/ip/firewall/mangle/add");
+    expect(added).toHaveLength(6);
+    expect(added.filter((w) => w.includes("=hotspot=auth"))).toHaveLength(3);
+
+    const authRules: Row[] = ["63", "127", "254"].map((t, i) => ({ ".id": `*H${i}`, comment: "MASHUPKGRID ANTI-TETHER", hotspot: "auth", ttl: `equal:${t}` }));
+    const off = fakeRouter({ files: ["hotspot/login.html", "hotspot/alogin.html"], radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }], mangles: [...authRules, ...LIST_RULES] });
+    expect(await off.adapter.ensureHotspotProvisioning({ ...opts, blockTethering: false })).toEqual(["anti-tethering rules set for packages that ask for it"]);
+    expect(off.writes.filter((w) => w[0] === "/ip/firewall/mangle/add")).toHaveLength(3);
+
+    const steady = fakeRouter({ files: ["hotspot/login.html", "hotspot/alogin.html"], radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }], mangles: [...authRules, ...LIST_RULES] });
+    expect(await steady.adapter.ensureHotspotProvisioning({ ...opts, blockTethering: true })).toEqual([]);
   });
 });

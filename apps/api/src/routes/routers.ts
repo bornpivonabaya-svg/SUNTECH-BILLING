@@ -32,6 +32,7 @@ import {
   routerRadiusHost,
   platformPublicAddress,
   listWalledGardenHostsFor,
+  reconcileRouterProvisioning,
 } from "@mashupkgrid/network";
 import {
   buildMikrotikProvisioningScript,
@@ -76,6 +77,8 @@ const createRouterSchema = z.object({
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
   routerOsMajor: z.union([z.literal(6), z.literal(7)]).nullable().optional(),
+  /** Anti-tethering for every signed-in hotspot device on this router (see antiTetheringRules). */
+  blockTethering: z.boolean().optional(),
 });
 
 const updateRouterSchema = createRouterSchema.partial();
@@ -450,6 +453,13 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
       const body = updateRouterSchema.parse(request.body);
       const before = await getRouterOrThrow(tenantId, routerId);
       const after = await updateRouter(tenantId, routerId, body);
+      // A changed anti-tethering switch is applied on the router now, not at the next 10-minute
+      // self-repair — in the background, so an unreachable router doesn't hold up the save.
+      if (body.blockTethering !== undefined && body.blockTethering !== before.blockTethering && after.host) {
+        void reconcileRouterProvisioning(routerId, { force: true }).catch((err) =>
+          request.log.warn({ err, routerId }, "could not apply the anti-tethering change on the router now; the next self-repair will")
+        );
+      }
 
       await writeAuditLog({
         tenantId,

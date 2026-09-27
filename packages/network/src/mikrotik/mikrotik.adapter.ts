@@ -567,6 +567,9 @@ export class MikroTikAdapter implements NetworkDeviceAdapter {
     walledGardenHosts?: string[];
     /** The per-app package filter (see app-filter.ts): installed when its rules are missing. */
     appFilter?: { scriptUrl: string; tag: string; expectedRules: number };
+    /** The router's "block tethering" switch: on, every signed-in hotspot device is checked;
+     *  off, only packages that ask for it. Undefined keeps whatever the router has. */
+    blockTethering?: boolean;
   }): Promise<string[]> {
     const client = this.requireClient();
     const changes: string[] = [];
@@ -648,43 +651,54 @@ export class MikroTikAdapter implements NetworkDeviceAdapter {
       changes.push("downloaded hotspot/alogin.html");
     }
 
-    // Anti-tethering once lived in the filter table's forward chain, which sees a packet's TTL
-    // after the router has taken one off, so it dropped every phone's own traffic ("logged in,
-    // nothing loads"). Move any such rules to mangle prerouting (see antiTetheringRules in the
-    // setup script), keeping whether the router had it on for everyone.
+    // Anti-tethering: kept to exactly the rules the setup script writes (antiTetheringRules),
+    // in mangle prerouting, which sees a packet's TTL as the device sent it. It once lived in the
+    // filter table's forward chain, which sees the TTL after the router has taken one off, so it
+    // dropped every phone's own traffic ("logged in, nothing loads"); any of those are removed.
+    const TETHER = "MASHUPKGRID ANTI-TETHER";
     const tetherFilters = (await client.print(["/ip/firewall/filter/print", "=.proplist=.id,comment,hotspot"])).filter(
-      (f) => f["comment"] === "MASHUPKGRID ANTI-TETHER" && f[".id"]
+      (f) => f["comment"] === TETHER && f[".id"]
     );
-    if (tetherFilters.length > 0) {
-      const globalOn = tetherFilters.some((f) => (f["hotspot"] ?? "").includes("auth"));
+    const tetherMangles = (await client.print(["/ip/firewall/mangle/print", "=.proplist=.id,comment,hotspot,src-address-list,ttl"])).filter(
+      (m) => m["comment"] === TETHER && m[".id"]
+    );
+    const hadGlobal = [...tetherFilters, ...tetherMangles].some((r) => (r["hotspot"] ?? "").includes("auth"));
+    const globalOn = opts.blockTethering ?? hadGlobal;
+    const ttls = ["63", "127", "254"];
+    const want = [
+      ...(globalOn ? ttls.map((t) => `auth|${t}`) : []),
+      ...ttls.map((t) => `list|${t}`),
+    ];
+    const have = tetherMangles.map((m) => `${(m["hotspot"] ?? "").includes("auth") ? "auth" : m["src-address-list"] === "mashup-anti-tether" ? "list" : "?"}|${(m["ttl"] ?? "").replace("equal:", "")}`);
+    const inStep = tetherFilters.length === 0 && have.length === want.length && want.every((w) => have.includes(w));
+    if (!inStep) {
       for (const f of tetherFilters) {
         assertNoTrap(await client.talk(["/ip/firewall/filter/remove", `=.id=${f[".id"]}`]), "/ip/firewall/filter/remove");
       }
-      const existing = await client.print(["/ip/firewall/mangle/print", "=.proplist=.id,comment"]);
-      for (const m of existing) {
-        if (m["comment"] === "MASHUPKGRID ANTI-TETHER" && m[".id"]) {
-          assertNoTrap(await client.talk(["/ip/firewall/mangle/remove", `=.id=${m[".id"]}`]), "/ip/firewall/mangle/remove");
-        }
+      for (const m of tetherMangles) {
+        assertNoTrap(await client.talk(["/ip/firewall/mangle/remove", `=.id=${m[".id"]}`]), "/ip/firewall/mangle/remove");
       }
-      const matches: string[][] = [...(globalOn ? [["=hotspot=auth"]] : []), ['=src-address-list=mashup-anti-tether']];
-      for (const match of matches) {
-        for (const ttl of [63, 127, 254]) {
-          assertNoTrap(
-            await client.talk([
-              "/ip/firewall/mangle/add",
-              "=chain=prerouting",
-              ...match,
-              `=ttl=equal:${ttl}`,
-              "=action=change-ttl",
-              "=new-ttl=set:1",
-              "=passthrough=no",
-              "=comment=MASHUPKGRID ANTI-TETHER",
-            ]),
-            "/ip/firewall/mangle/add"
-          );
-        }
+      for (const w of want) {
+        const [kind, ttl] = w.split("|") as [string, string];
+        assertNoTrap(
+          await client.talk([
+            "/ip/firewall/mangle/add",
+            "=chain=prerouting",
+            kind === "auth" ? "=hotspot=auth" : "=src-address-list=mashup-anti-tether",
+            `=ttl=equal:${ttl}`,
+            "=action=change-ttl",
+            "=new-ttl=set:1",
+            "=passthrough=no",
+            `=comment=${TETHER}`,
+          ]),
+          "/ip/firewall/mangle/add"
+        );
       }
-      changes.push(`moved anti-tethering to prerouting${globalOn ? " (all hotspot users)" : ""}; phones were being blocked`);
+      changes.push(
+        tetherFilters.length > 0
+          ? `moved anti-tethering to prerouting${globalOn ? " (all hotspot users)" : ""}; phones were being blocked`
+          : `anti-tethering rules set${globalOn ? " for all hotspot users" : " for packages that ask for it"}`
+      );
     }
 
     const servers = await client.print(["/radius/print"]);
