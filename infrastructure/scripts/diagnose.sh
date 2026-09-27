@@ -63,6 +63,11 @@ done
 
 section "WireGuard (remote management)"
 echo "A working router shows 'latest handshake' under its peer. None = the tunnel has never connected."
+ACTUAL_WG_KEY=$("${COMPOSE[@]}" exec -T api sh -c 'wg show wg0 public-key 2>/dev/null' 2>/dev/null | tr -d '\r')
+if [ -z "$ACTUAL_WG_KEY" ]; then echo "server key check: wg0 is not up in the api container"
+elif [ "$ACTUAL_WG_KEY" = "$(env_value WIREGUARD_SERVER_PUBLIC_KEY)" ]; then echo "server key check: routers are given the server's real key (OK)"
+else echo "server key check: MISMATCH — routers are given WIREGUARD_SERVER_PUBLIC_KEY, which is not wg0's key, so no router can ever connect"; fi
+echo "If every peer lacks a handshake and the key is OK: allow UDP 51820 INBOUND in the Azure Network Security Group."
 run "${COMPOSE[@]}" exec -T api sh -c 'wg show 2>/dev/null | grep -E "^(interface|peer|  latest handshake|  transfer|  allowed ips|  listening port)" | sed -E "s/^(peer: ).*/\1<hidden>/" || echo "wg not running in the api container"'
 
 section "Recent errors — api (RADIUS runs in the worker)"

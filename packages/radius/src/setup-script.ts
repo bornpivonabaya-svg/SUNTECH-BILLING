@@ -501,6 +501,9 @@ function heartbeatOnEvent(callbackUrl: string): string {
 export function buildHeartbeatScript(callbackUrl: string): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   return [
+    // cpu-load is the last second's load, and this runs straight after the router fetched it over
+    // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
+    `:delay 3s`,
     `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")})`,
     `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={}`,
     `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={}`,
