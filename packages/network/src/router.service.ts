@@ -205,10 +205,15 @@ async function syncRadiusNasRegistration(router: Router, sourceAddress: string):
   // silently break whichever one lost the race. Leave it and make the reason visible instead.
   const conflict = await prisma.radiusNas.findFirst({
     where: { nasname: sourceAddress },
-    include: { router: { select: { deletedAt: true } } },
+    include: { router: { select: { deletedAt: true, lastSeenAt: true } } },
   });
-  // A row left behind by a removed router is not a live claim on the address.
-  if (conflict && conflict.routerId && conflict.routerId !== router.id && !conflict.router?.deletedAt) {
+  // A row left behind by a removed router is not a live claim on the address, and neither is one
+  // whose router has been silent for 10 minutes: on a mobile network (CGNAT) addresses move from
+  // one subscriber to the next, and the router checking in right now is the one really there.
+  const conflictIsLive =
+    !conflict?.router?.deletedAt &&
+    Boolean(conflict?.router?.lastSeenAt && Date.now() - conflict.router.lastSeenAt.getTime() < 10 * 60_000);
+  if (conflict && conflict.routerId && conflict.routerId !== router.id && conflictIsLive) {
     console.warn(
       `[radius] Cannot register router ${router.id} at ${sourceAddress}: already registered to router ${conflict.routerId}. ` +
         `Both routers appear to share one public address — hotspot/PPPoE auth cannot work for both.`
