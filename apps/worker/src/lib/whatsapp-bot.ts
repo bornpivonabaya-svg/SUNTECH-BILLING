@@ -1,10 +1,12 @@
 import { Redis } from "ioredis";
+import { answerSupportMessage } from "@mashupkgrid/ai";
 import { prisma } from "@mashupkgrid/database";
 import { env } from "@mashupkgrid/config";
 import { listHotspotPackages } from "@mashupkgrid/radius";
 import { initiateHotspotPurchaseStkPush, initiateStkPushForCustomer } from "@mashupkgrid/payments";
 import { createTicket } from "@mashupkgrid/support";
 import { sendWhatsAppMessage, type WASocket } from "@mashupkgrid/whatsapp";
+import { isAppError } from "@mashupkgrid/shared";
 import { formatMoney, formatDuration } from "./format.js";
 
 /**
@@ -270,6 +272,26 @@ async function handleTicket(
 }
 
 /**
+ * The support assistant's answer to a free-text message, or null when it doesn't apply (no AI
+ * set up for this ISP, or the number isn't a customer's), so the menu is shown as before.
+ */
+async function tryAssistant(tenantId: string, phone: string, text: string): Promise<string | null> {
+  if (!tenantId || tenantId === "platform") return null;
+  const customer = await prisma.customer.findFirst({ where: { tenantId, phone: { endsWith: subscriberDigits(phone) }, deletedAt: null }, select: { id: true } });
+  if (!customer) return null;
+  try {
+    const res = await answerSupportMessage({ tenantId, customerId: customer.id, channel: "WHATSAPP", message: text });
+    if (res.reply) return res.reply;
+    // Already with staff: the message went onto the ticket.
+    return `Thanks, we've added this to your support ticket ${res.ticketNumber ?? ""}. Someone from the team will reply here. Send "menu" for other options.`;
+  } catch (err) {
+    if (isAppError(err) && err.statusCode === 409) return null;
+    console.error("[whatsapp-bot] support assistant failed", err);
+    return null;
+  }
+}
+
+/**
  * Entry point wired to the socket's inbound-message event. Never throws: an unhandled rejection
  * here would surface as an unhandled promise rejection in the worker rather than anything the
  * customer or an operator can act on, so every failure is logged and answered with a plain
@@ -386,6 +408,17 @@ export async function handleIncomingWhatsAppMessage(
       await saveSession(tenantId, sessionId, session);
       await sendWhatsAppMessage(sock, replyTarget, "💬 Please type your message and our support team will get back to you.");
       return;
+    }
+
+    // Free text from a known customer goes to the support assistant, when the ISP has one set up.
+    if (!isReset && phone) {
+      const aiReply = await tryAssistant(tenantId, phone, input);
+      if (aiReply) {
+        session.state = "main";
+        await saveSession(tenantId, sessionId, session);
+        await sendWhatsAppMessage(sock, replyTarget, aiReply);
+        return;
+      }
     }
 
     // If the customer sent something we don't recognise (not a menu number, not a reset keyword),
