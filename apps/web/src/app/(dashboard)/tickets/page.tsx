@@ -66,13 +66,13 @@ export default function TicketsPage() {
         </p>
       </div>
 
-      <div className="flex border-b border-slate-200 dark:border-obsidian-800">
+      <div className="flex overflow-x-auto border-b border-slate-200 [scrollbar-width:none] dark:border-obsidian-800">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
             type="button"
             onClick={() => setStatusFilter(tab.value)}
-            className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+            className={`shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
               statusFilter === tab.value
                 ? "border-brand-600 text-brand-600 dark:border-brand-400 dark:text-brand-400"
                 : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400"

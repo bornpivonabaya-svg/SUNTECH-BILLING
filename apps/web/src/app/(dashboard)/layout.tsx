@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
@@ -20,6 +20,9 @@ import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import { localizeNavSections } from "@/lib/nav-strings";
 import { dashboardStrings } from "@/lib/dashboard-strings";
 import { Segmented } from "@/components/dashboard/surface";
+
+/** The phone tab bar: the few pages an ISP opens many times a day, plus the full menu. */
+const QUICK_HREFS = ["/dashboard", "/customers", "/online-users", "/payments", "/tenants", "/routers"];
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return (
@@ -103,6 +106,18 @@ function DashboardShell({ children }: { children: ReactNode }) {
   // (lib/navigation.ts), so a page is never reachable from one and missing from another.
   const sections = useMemo(() => (user ? localizeNavSections(buildNavSections(user), lang) : []), [user, lang]);
   const current = useMemo(() => findCurrentNav(sections, pathname), [sections, pathname]);
+  const quickItems = useMemo(() => {
+    const all = sections.flatMap((sec) => sec.items);
+    return QUICK_HREFS.map((h) => all.find((i) => i.href === h)).filter((i): i is NavItem => Boolean(i)).slice(0, 4);
+  }, [sections]);
+
+  // Opening the menu on a phone shows the current page, not the top of a long list.
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const el = navRef.current?.querySelector('[aria-current="page"]');
+    el?.scrollIntoView({ block: "center" });
+  }, [mobileNavOpen]);
 
   if (loading) {
     return (
@@ -159,7 +174,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
           </div>
 
           {/* Nav Links */}
-          <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4 scrollbar-none" aria-label="Main">
+          <nav ref={navRef} className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4 scrollbar-none" aria-label="Main">
             {sections.map((section, i) => (
               <div key={section.title ?? i}>
                 {section.title && <p className="px-3 pb-1 pt-5 text-xs font-medium text-slate-500">{section.title}</p>}
@@ -172,6 +187,27 @@ function DashboardShell({ children }: { children: ReactNode }) {
 
           {/* User Account Footer Card */}
           <div className="border-t border-obsidian-800 p-3">
+            {/* Phones: the header has no room for these, so they live in the menu. */}
+            <div className="mb-3 flex items-center justify-between gap-2 px-1 sm:hidden">
+              <Segmented
+                label={t.language}
+                value={lang}
+                onChange={setLang}
+                options={[
+                  { value: "en", label: "EN" },
+                  { value: "sw", label: "SW" },
+                ]}
+              />
+              <Segmented
+                label={t.theme}
+                value={theme}
+                onChange={setTheme}
+                options={[
+                  { value: "dark", label: t.dark },
+                  { value: "light", label: t.light },
+                ]}
+              />
+            </div>
             <div className="flex items-center gap-2.5 px-1">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-obsidian-800 text-xs font-medium text-slate-200">
                 {initialsOf(user.email)}
@@ -225,6 +261,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              <div className="hidden items-center gap-2 sm:flex">
               <Segmented
                 label={t.language}
                 value={lang}
@@ -243,6 +280,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
                   { value: "light", label: t.light },
                 ]}
               />
+              </div>
               <CommandPaletteTrigger onOpen={() => palette.setOpen(true)} />
               {isTenantScoped && <NotificationBell />}
               {user.tenantTrialEndsAt && (
@@ -259,7 +297,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          <main key={lang} className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-4 sm:p-6 lg:p-8">
+          <main key={lang} className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-4 pb-24 sm:p-6 sm:pb-24 lg:p-8">
             <DashboardBanners />
             {user.isTrialExpired &&
             !pathname.startsWith("/settings/billing") &&
@@ -270,6 +308,38 @@ function DashboardShell({ children }: { children: ReactNode }) {
             )}
           </main>
         </div>
+
+        {/* Phone tab bar: the busiest pages one tap away, and the full menu. */}
+        <nav
+          aria-label={lang === "sw" ? "Kurasa kuu" : "Main pages"}
+          className="fixed inset-x-0 bottom-0 z-30 border-t border-obsidian-800 bg-obsidian-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        >
+          <div className="mx-auto flex max-w-lg">
+            {quickItems.map((item) => {
+              const active = current?.item.href === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium ${active ? "text-brand-400" : "text-slate-400"}`}
+                >
+                  <NavIconGlyph name={item.icon} />
+                  <span className="max-w-full truncate px-1">{item.label}</span>
+                </Link>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label={t.openMenu}
+              className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium ${current && !quickItems.some((q) => q.href === current.item.href) ? "text-brand-400" : "text-slate-400"}`}
+            >
+              <IconMenu size={18} />
+              <span>{lang === "sw" ? "Menyu" : "Menu"}</span>
+            </button>
+          </div>
+        </nav>
         <CommandPalette open={palette.open} onClose={() => palette.setOpen(false)} />
         {liveChat?.show && <TawkToWidget widgetId={liveChat.widgetId} />}
       </div>

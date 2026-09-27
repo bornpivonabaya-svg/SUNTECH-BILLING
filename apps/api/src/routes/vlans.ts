@@ -15,7 +15,8 @@ import {
   createAdapterForRouter,
 } from "@mashupkgrid/network";
 import { prisma } from "@mashupkgrid/database";
-import { successResponse, ConflictError } from "@mashupkgrid/shared";
+import { buildVlanServiceScript, applyVlanToRouter, vlanServiceFor } from "@mashupkgrid/radius";
+import { successResponse, ConflictError, ValidationError } from "@mashupkgrid/shared";
 import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
@@ -57,6 +58,8 @@ const vlanBodySchema = z.object({
   // 68 is the IPv4 minimum; 9216 covers jumbo frames. Outside that a device will reject it
   // anyway, and a typo here is far likelier than a real requirement.
   mtu: z.number().int().min(68).max(9216).nullable().optional(),
+  /** Router port the switch trunk is in; empty lets the platform pick a free one. */
+  trunkInterface: z.string().regex(/^[a-zA-Z0-9_.-]{0,64}$/, "Use a port name like ether5 or sfp1").nullable().optional(),
   isEnabled: z.boolean().optional(),
   oltDeviceRef: z.string().max(120).nullable().optional(),
   ponPort: z.string().max(60).nullable().optional(),
@@ -313,37 +316,19 @@ export async function vlanRoutes(app: FastifyInstance): Promise<void> {
               gateway: t.gateway,
               routerId: targetRouter?.id ?? null,
               isEnabled: true,
-              provisioningStatus: "ACTIVE",
-              lastProvisionedAt: new Date(),
             },
           });
           created.push(v);
         }
       }
 
-      if (targetRouter?.host) {
-        try {
-          const adapter = createAdapterForRouter({ ...targetRouter, host: targetRouter.host });
-          await adapter.connect();
-          for (const v of created) {
-            try {
-              await adapter.createVlanInterface?.({
-                name: `vlan${v.vlanTag}`,
-                vlanId: v.vlanTag,
-                parentInterface: "ether2",
-                comment: `MashupKGrid ${v.name}`,
-              });
-            } catch (_) {
-              // Ignore if already configured or interface differs
-            }
-          }
-          await adapter.disconnect().catch(() => {});
-        } catch (_) {
-          // Device offline or unreachable
-        }
+      // Hotspot and PPPoE templates are set up on the router right away (or once it's online).
+      const results = [];
+      for (const v of created) {
+        if (v.routerId && vlanServiceFor(v.type)) results.push({ vlanId: v.id, ...(await applyVlanToRouter(tenantId, v.id)) });
       }
 
-      reply.send(successResponse({ provisioned: created.length, vlans: created }, request.id));
+      reply.send(successResponse({ provisioned: created.length, vlans: created, routerSetup: results }, request.id));
     }
   );
 
@@ -355,31 +340,9 @@ export async function vlanRoutes(app: FastifyInstance): Promise<void> {
       const body = vlanBodySchema.parse(request.body);
       const vlan = await createVlan(tenantId, body);
 
-      // Automatically push VLAN to MikroTik router if assigned and reachable
-      if (vlan.routerId) {
-        const router = await prisma.router.findFirst({ where: { id: vlan.routerId, tenantId, deletedAt: null } });
-        if (router?.host) {
-          try {
-            const adapter = createAdapterForRouter({ ...router, host: router.host });
-            await adapter.connect();
-            const ifaces = (await adapter.listInterfaces?.()) || [];
-            const parent = ifaces.find((i) => i.name === "ether2" || i.name === "bridge")?.name || ifaces[0]?.name || "ether2";
-            await adapter.createVlanInterface?.({
-              name: `vlan${vlan.vlanTag}`,
-              vlanId: vlan.vlanTag,
-              parentInterface: parent,
-              comment: `MashupHost ${vlan.name}`,
-            });
-            await prisma.vlan.update({
-              where: { id: vlan.id },
-              data: { provisioningStatus: "ACTIVE", lastProvisionedAt: new Date() },
-            });
-            await adapter.disconnect().catch(() => {});
-          } catch (err) {
-            request.log.warn({ err }, "Could not automatically push VLAN to router - will sync on router connect");
-          }
-        }
-      }
+      // Set the VLAN's hotspot or PPPoE up on its router straight away. An offline router leaves
+      // it PENDING and the worker finishes it when the router is back — nothing to paste.
+      const routerSetup = vlan.routerId && vlanServiceFor(vlan.type) ? await applyVlanToRouter(tenantId, vlan.id) : null;
 
       await writeAuditLog({
         tenantId,
@@ -394,7 +357,7 @@ export async function vlanRoutes(app: FastifyInstance): Promise<void> {
 
       reply
         .status(201)
-        .send(successResponse({ ...vlan, tagAdvisory: describeVlanTagRisk(vlan.vlanTag) }, request.id));
+        .send(successResponse({ ...vlan, ...(routerSetup ? { provisioningStatus: routerSetup.status, trunkInterface: routerSetup.trunkInterface } : {}), routerSetup, tagAdvisory: describeVlanTagRisk(vlan.vlanTag) }, request.id));
     }
   );
 
@@ -509,6 +472,59 @@ export async function vlanRoutes(app: FastifyInstance): Promise<void> {
       });
 
       reply.status(204).send();
+    }
+  );
+
+  /** The VLAN manual's script generator: a RouterOS script that runs a hotspot or a PPPoE server
+   *  on one VLAN (see packages/radius vlan-script). Read-only, so vlans.read is enough. */
+  app.post(
+    "/setup-script",
+    { config: { audience: "staff" as const }, preHandler: [...preHandler, requirePermission("vlans.read")] },
+    async (request, reply) => {
+      requireTenant(request.user!.tenantId);
+      const body = z
+        .object({
+          service: z.enum(["hotspot", "pppoe"]),
+          vlanTag: z.number().int(),
+          name: z.string().max(80).default(""),
+          trunkInterface: z.string().min(1).max(64),
+          subnetCidr: z.string().min(1).max(32),
+          gateway: z.string().max(15).nullable().optional(),
+          dnsServers: z.array(z.string().max(15)).max(4).optional(),
+          mtu: z.number().int().min(1280).max(9000).nullable().optional(),
+        })
+        .parse(request.body);
+      try {
+        reply.send(successResponse({ script: buildVlanServiceScript(body) }, request.id));
+      } catch (err) {
+        throw new ValidationError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
+  /** One click: (re)does the VLAN's hotspot or PPPoE setup on its router over the API. */
+  app.post(
+    "/:vlanId/apply",
+    { config: { audience: "staff" as const }, preHandler: [...preHandler, requirePermission("vlans.manage")] },
+    async (request, reply) => {
+      const tenantId = requireTenant(request.user!.tenantId);
+      const { vlanId } = idParamsSchema.parse(request.params);
+      const { trunkInterface } = z
+        .object({ trunkInterface: z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/, "Use a port name like ether5 or sfp1").nullable().optional() })
+        .parse(request.body ?? {});
+      await getVlanOrThrow(tenantId, vlanId);
+      const result = await applyVlanToRouter(tenantId, vlanId, { trunkInterface });
+      await writeAuditLog({
+        tenantId,
+        actorUserId: request.user!.id,
+        action: "vlan.applied_to_router",
+        resourceType: "Vlan",
+        resourceId: vlanId,
+        after: { ...result },
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+      reply.send(successResponse(result, request.id));
     }
   );
 }

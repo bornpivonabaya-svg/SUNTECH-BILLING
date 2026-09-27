@@ -259,6 +259,10 @@ export function buildMikrotikProvisioningScript(
     hotspotPorts?: string[];
     /** Dedicated non-hotspot direct LAN port (e.g. "ether4" or "ether5") with no captive portal. */
     lanPort?: string | null;
+    /** RouterOS major version the ISP chose when adding the router (null: detect on the router).
+     *  v6 gets no WireGuard section and its own NTP syntax; either way the script warns in the
+     *  router's log if the router turns out to run the other version. */
+    routerOsMajor?: number | null;
   } = {}
 ): string {
   const apiLine = router.useTls
@@ -280,7 +284,11 @@ export function buildMikrotikProvisioningScript(
   const serverPort = options.serverPort || 51820;
   const serverPublicKey = options.serverPublicKey || "";
   const vpnIp = options.vpnIp || "10.90.0.2";
-  const wireguardSection = serverPublicKey
+  const osMajor = options.routerOsMajor === 6 || options.routerOsMajor === 7 ? options.routerOsMajor : null;
+  const versionSection = buildVersionSection(osMajor);
+  const ntpLines = buildNtpLines(osMajor);
+  // WireGuard is v7-only: a router the ISP says runs v6 doesn't get the (guarded) section at all.
+  const wireguardSection = serverPublicKey && osMajor !== 6
     ? `
 # Optional management VPN (RouterOS v7+). This is deliberately last: a legacy or low-resource
 # hAP must still finish hotspot provisioning even when WireGuard is unavailable.
@@ -367,6 +375,7 @@ export function buildMikrotikProvisioningScript(
 
   const minimalProvisioningScript = `# MASHUPKGRID ISP - safe baseline setup for "${safeName}"
 # The router must already have WAN internet access for this file to download.
+${versionSection}
 :do {/tool fetch url="${callbackUrl}" http-method=post keep-result=no} on-error={}
 
 # The platform's management account comes first, before anything that can drop the session
@@ -430,9 +439,7 @@ ${walledGardenLines(walledGardenHosts)}
 
 # Automated NTP Time Synchronization
 :do {/system clock set time-zone-autodetect=yes time-zone-name=Africa/Nairobi} on-error={}
-:do {/system ntp client set enabled=yes} on-error={}
-:do {/system ntp client servers add address=pool.ntp.org} on-error={}
-:do {/system ntp client servers add address=time.google.com} on-error={}
+${ntpLines}
 
 ${pppoeSection}
 
@@ -444,8 +451,10 @@ ${wireguardSection}
 ${appFilterSection}
 
 # Wi-Fi last: renaming the network disconnects anyone configuring the router over it.
-:do {/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="MASHUPKGRID"} on-error={}
-
+${osMajor === 7 ? "" : `:do {/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="MASHUPKGRID"} on-error={}
+`}${osMajor === 6 ? "" : `# RouterOS 7 routers with the newer "wifi" package (ax models) name the radio wifi1.
+:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap configuration.ssid="MASHUPKGRID"} on-error={}
+`}
 :put "========================================================="
 :put "  SUCCESS! Router & Hotspot captive portal are ONLINE!  "
 :put "  All ISP core features and per-app packages activated!  "
@@ -453,6 +462,31 @@ ${appFilterSection}
 `;
 
   return wrapTopLevelCommands(minimalProvisioningScript);
+}
+
+/** Opening lines naming the RouterOS version the script was made for, and a check that warns
+ *  (on screen and in the router's log) when the router runs another one — the script still
+ *  runs, since every command is wrapped, but the ISP learns to regenerate it with the right one. */
+export function buildVersionSection(osMajor: 6 | 7 | null): string {
+  if (osMajor === null) {
+    return `# RouterOS version: detected on the router (works on v6 and v7).
+:put ("RouterOS " . [/system resource get version])`;
+  }
+  const warning = `MASHUPKGRID: this script was made for RouterOS v${osMajor} but this router runs `;
+  return `# RouterOS version: made for v${osMajor} (chosen when the router was added).
+:if ([:pick [/system resource get version] 0 1] != "${osMajor}") do={:put ("WARNING: ${warning}" . [/system resource get version] . ". Change the version on the router's page and run the new script."); :log warning ("${warning}" . [/system resource get version])}`;
+}
+
+/** NTP: RouterOS 7 lists servers under /system ntp client servers; v6 takes them as
+ *  server-dns-names. Unknown version: both, and the one the router doesn't know fails alone. */
+export function buildNtpLines(osMajor: 6 | 7 | null): string {
+  const v7 = `:do {/system ntp client set enabled=yes} on-error={}
+:do {/system ntp client servers add address=pool.ntp.org} on-error={}
+:do {/system ntp client servers add address=time.google.com} on-error={}`;
+  const v6 = `:do {/system ntp client set enabled=yes server-dns-names=pool.ntp.org,time.google.com} on-error={}`;
+  if (osMajor === 7) return v7;
+  if (osMajor === 6) return v6;
+  return `${v7}\n${v6}`;
 }
 
 /** /import stops at the first command RouterOS rejects, and everything after it silently never

@@ -33,3 +33,6 @@ docs
 
 # ...but the customer app download served by the web app must ship.
 !apps/web/public/download/*.apk
+
+# The Sanity Studio is deployed to sanity.studio, never built into an image.
+studio

@@ -144,6 +144,7 @@ model Tenant {
   agentRemittances AgentRemittance[]
   campaigns        Campaign[]
   leads            Lead[]
+  supportChats     SupportChat[]
 
   @@index([status])
   @@map("tenants")
@@ -503,6 +504,7 @@ model Customer {
   winBackOffers      WinBackOffer[]
   campaignRecipients CampaignRecipient[]
   leads              Lead[]
+  supportChats       SupportChat[]
 
   @@unique([tenantId, customerNumber])
   @@unique([tenantId, referralCode])
@@ -1773,7 +1775,8 @@ model Ticket {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  messages TicketMessage[]
+  messages    TicketMessage[]
+  supportChat SupportChat?
 
   @@index([tenantId, status])
   @@map("tickets")
@@ -1957,6 +1960,9 @@ model Router {
   boardName            String?
   firmwareVersion      String?
   versionCheckedAt     DateTime?
+  /// The RouterOS major version (6 or 7) the ISP said this router runs when adding it; null = let
+  /// the setup script detect it. Shapes the script (v6 gets no WireGuard, its own NTP syntax).
+  routerOsMajor        Int?
   rolloutTargets       RouterRolloutTarget[]
   tenantId             String
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2418,9 +2424,12 @@ model Vlan {
   ipPool     IPPool?  @relation(fields: [ipPoolId], references: [id], onDelete: SetNull)
   dnsServers String[] @default([])
 
-  downloadKbps Int?
-  uploadKbps   Int?
-  mtu          Int?
+  downloadKbps   Int?
+  uploadKbps     Int?
+  mtu            Int?
+  /// The router port the switch trunk is patched into. Detected on the router the first time
+  /// the VLAN is set up there (a free ethernet port that isn't WAN, hotspot or LAN), then kept.
+  trunkInterface String?
 
   /// Whether an administrator has this VLAN switched on in the billing system. Distinct from
   /// provisioningStatus, which reflects the device.
@@ -3216,4 +3225,50 @@ model Lead {
 enum MfaMethod {
   TOTP
   SMS
+}
+
+enum SupportChatChannel {
+  APP
+  WHATSAPP
+}
+
+enum SupportChatStatus {
+  /// The assistant is answering.
+  OPEN
+  /// Handed to staff as a ticket; new messages go to the ticket.
+  HANDED_OVER
+  CLOSED
+}
+
+/// A customer's conversation with the AI support assistant, in the app or on WhatsApp. When it
+/// hands over, the whole conversation goes onto a support ticket for staff.
+model SupportChat {
+  id         String               @id @default(uuid())
+  tenantId   String
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel    SupportChatChannel
+  status     SupportChatStatus    @default(OPEN)
+  ticketId   String?              @unique
+  ticket     Ticket?              @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  messages   SupportChatMessage[]
+
+  @@index([customerId, status, updatedAt])
+  @@map("support_chats")
+}
+
+model SupportChatMessage {
+  id        String      @id @default(uuid())
+  chatId    String
+  chat      SupportChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  /// "user" (the customer), "assistant", or "staff" once handed over.
+  role      String
+  content   String
+  createdAt DateTime    @default(now())
+
+  @@index([chatId, createdAt])
+  @@map("support_chat_messages")
 }

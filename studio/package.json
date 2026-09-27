@@ -1,0 +1,28 @@
+{
+  "name": "mashuphost-studio",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sanity Studio for the MashupHost website. Kept outside the pnpm workspace on purpose: the Studio needs React 19, the web app runs React 18.",
+  "type": "module",
+  "scripts": {
+    "dev": "sanity dev",
+    "build": "sanity build",
+    "deploy": "sanity deploy",
+    "seed": "sanity dataset import seed/homepage.ndjson production --replace",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sanity/vision": "^6.0.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "sanity": "^6.0.0",
+    "styled-components": "^6.1.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

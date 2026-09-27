@@ -58,6 +58,7 @@ const LABELS_SW: Record<string, string> = {
   "Subscription plans": "Mipango ya usajili",
   "Maintenance mode": "Hali ya matengenezo",
   "Walled garden": "Tovuti zinazoruhusiwa",
+  "VLAN manual": "Mwongozo wa VLAN",
   Overview: "Muhtasari",
   Reconciliation: "Ulinganisho",
   "Payment gateway": "Lango la malipo",

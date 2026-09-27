@@ -1,3 +1,5 @@
+import { checkPendingDomains } from "@mashupkgrid/network";
+import { retryPendingVlans } from "@mashupkgrid/radius";
 import { handleRunProvisioningJobs } from "./jobs/run-provisioning-jobs.js";
 import { Worker, Queue } from "bullmq";
 import { env } from "@mashupkgrid/config";
@@ -187,6 +189,10 @@ async function main() {
           return run(handleExpireOverdueVouchers);
         case JOB_NAMES.pollRouterHealth:
           return run(handlePollRouterHealth);
+        case JOB_NAMES.retryPendingVlans:
+          return run(retryPendingVlans);
+        case JOB_NAMES.checkPendingDomains:
+          return run(checkPendingDomains);
         case JOB_NAMES.networkMaintenanceNotices:
           return run(handleNetworkMaintenanceNotices);
         case JOB_NAMES.routerRollouts:

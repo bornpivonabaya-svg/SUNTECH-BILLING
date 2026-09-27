@@ -17,7 +17,7 @@ import { allocateNextVpnIp, registerWireguardPeer, removeWireguardPeer } from ".
 import { ensureWinboxRelayPort } from "./winbox-relay.service.js";
 import { APP_FILTER_RULE_COUNT, APP_FILTER_TAG } from "./app-filter.js";
 import { rememberActiveDevices } from "./hotspot-device.service.js";
-import { listPlatformWalledGardenHosts } from "./walled-garden.js";
+import { listWalledGardenHostsFor } from "./walled-garden.js";
 
 export interface RouterHeartbeatMetrics {
   cpuLoadPercent?: number;
@@ -40,6 +40,7 @@ export interface CreateRouterInput {
   branchId?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  routerOsMajor?: 6 | 7 | null;
 }
 
 export type UpdateRouterInput = Partial<CreateRouterInput>;
@@ -68,6 +69,7 @@ export async function createRouter(tenantId: string, input: CreateRouterInput): 
       siteName: input.siteName ?? null,
       latitude: input.latitude ?? null,
       longitude: input.longitude ?? null,
+      routerOsMajor: input.routerOsMajor ?? null,
       host: input.host,
       apiPort: input.apiPort ?? 8728,
       useTls: input.useTls ?? false,
@@ -95,6 +97,7 @@ export interface PendingRouterPppoe {
   blockTethering?: boolean;
   hotspotPorts?: string[];
   lanPort?: string | null;
+  routerOsMajor?: 6 | 7 | null;
 }
 
 export async function createPendingRouter(
@@ -127,6 +130,7 @@ export async function createPendingRouter(
       blockTethering: pppoe.blockTethering === true,
       hotspotPorts: pppoe.hotspotPorts && pppoe.hotspotPorts.length > 0 ? pppoe.hotspotPorts : [],
       lanPort: pppoe.lanPort?.trim() || null,
+      routerOsMajor: pppoe.routerOsMajor ?? null,
     },
   });
 
@@ -437,6 +441,7 @@ export async function updateRouter(tenantId: string, routerId: string, patch: Up
       ...(patch.branchId !== undefined ? { branchId: patch.branchId } : {}),
       ...(patch.latitude !== undefined ? { latitude: patch.latitude } : {}),
       ...(patch.longitude !== undefined ? { longitude: patch.longitude } : {}),
+      ...(patch.routerOsMajor !== undefined ? { routerOsMajor: patch.routerOsMajor } : {}),
       ...(patch.username !== undefined
         ? { usernameEncrypted: encryptAtRest(patch.username, env.ENCRYPTION_KEY) }
         : {}),
@@ -613,9 +618,9 @@ export async function reconcileRouterProvisioning(routerId: string, options: { f
       walledGardenHosts: [
         hostOf(env.APP_PORTAL_URL || "https://captive.mashuphost.tech"),
         hostOf(routerFacingApiBase()),
-        // What a super admin allowed from the dashboard — this pass is how a router that is
-        // already online picks up a host added after it was linked.
-        ...(await listPlatformWalledGardenHosts()),
+        // What a super admin and this ISP allowed from the dashboard — this pass is how a router
+        // that is already online picks up a host added after it was linked.
+        ...(await listWalledGardenHostsFor(router.tenantId)),
       ].filter(Boolean),
       appFilter: {
         scriptUrl: `${routerFacingApiBase()}/api/v1/hotspot/${router.tenant.slug}/mikrotik-app-filter.rsc`,

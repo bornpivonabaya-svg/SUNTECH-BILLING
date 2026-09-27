@@ -107,6 +107,9 @@ export const tenantPreferencesSchema = z.object({
     /** QuickBooks tax code for taxed lines, e.g. "VAT 16%" or "TAX". */
     taxCode: z.string().max(60),
   }),
+  /** Hosts this ISP's hotspot customers can reach before paying (its website, a payment page),
+   *  on top of the platform's list. Checked with the same rules as the platform list. */
+  walledGarden: z.object({ hosts: z.array(z.string().max(253)).max(50) }),
   /** VAT details for the monthly tax report. */
   tax: z.object({
     vatRegistered: z.boolean(),
@@ -172,6 +175,7 @@ export const DEFAULT_TENANT_PREFERENCES: TenantPreferences = {
   winBack: { enabled: false, discountPercent: 20, validDays: 7, minDaysBetween: 60 },
   coverage: { enabled: true, radiusKm: 3 },
   security: { requireStaffMfa: false },
+  walledGarden: { hosts: [] },
   accounting: { salesAccountCode: "200", taxType: "16% VAT", noTaxType: "Tax Exempt", itemName: "Internet service", taxCode: "VAT 16%" },
 };
 
@@ -186,6 +190,7 @@ export function resolveTenantPreferences(stored: unknown): TenantPreferences {
   const tax = (raw.tax && typeof raw.tax === "object" ? raw.tax : {}) as Record<string, unknown>;
   const referrals = (raw.referrals && typeof raw.referrals === "object" ? raw.referrals : {}) as Record<string, unknown>;
   const upgrades = (raw.upgrades && typeof raw.upgrades === "object" ? raw.upgrades : {}) as Record<string, unknown>;
+  const walledGarden = (raw.walledGarden && typeof raw.walledGarden === "object" ? raw.walledGarden : {}) as Record<string, unknown>;
   const accounting = (raw.accounting && typeof raw.accounting === "object" ? raw.accounting : {}) as Record<string, unknown>;
   const security = (raw.security && typeof raw.security === "object" ? raw.security : {}) as Record<string, unknown>;
   const coverage = (raw.coverage && typeof raw.coverage === "object" ? raw.coverage : {}) as Record<string, unknown>;
@@ -209,6 +214,7 @@ export function resolveTenantPreferences(stored: unknown): TenantPreferences {
     coverage: { ...DEFAULT_TENANT_PREFERENCES.coverage, ...coverage },
     security: { ...DEFAULT_TENANT_PREFERENCES.security, ...security },
     accounting: { ...DEFAULT_TENANT_PREFERENCES.accounting, ...accounting },
+    walledGarden: { ...DEFAULT_TENANT_PREFERENCES.walledGarden, ...walledGarden },
   };
   const parsed = tenantPreferencesSchema.safeParse(merged);
   return parsed.success ? parsed.data : DEFAULT_TENANT_PREFERENCES;

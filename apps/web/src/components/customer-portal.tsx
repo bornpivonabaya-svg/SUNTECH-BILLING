@@ -12,6 +12,7 @@ import { MyReferralPanel } from "@/components/my-referral-panel";
 import { PausePlan } from "@/components/pause-plan";
 import { AccountMembers } from "@/components/account-members";
 import { BuyAddOn } from "@/components/buy-addon";
+import { SupportChat } from "@/components/support-chat";
 import { useLanguage } from "@/lib/language-context";
 
 /**
@@ -473,6 +474,8 @@ export function CustomerPortal({ view = "all", onPay }: { view?: PortalView; onP
       {show("refer") && <MyReferralPanel />}
 
       {/* Support */}
+      {show("support") && <SupportChat />}
+
       {show("support") && <Panel
         title={t.support}
         description={t.supportDesc}

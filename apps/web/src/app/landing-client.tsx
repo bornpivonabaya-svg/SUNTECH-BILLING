@@ -3,6 +3,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import { DEFAULT_LANDING_CONTENT, type LandingContent } from "@/lib/landing-content";
+import { DEFAULT_LANDING_SECTIONS, type LandingIcon, type LandingSections } from "@/lib/landing-sections";
 import { SiteHeader } from "@/components/marketing/site-header";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SUPPORT_PHONE_DISPLAY, whatsappLink } from "@/components/marketing/brand";
@@ -13,7 +14,6 @@ import {
   IconGlobe,
   IconInvoice,
   IconMessage,
-  IconLayers,
   IconLock,
   IconMpesa,
   IconPulse,
@@ -26,6 +26,21 @@ import {
 } from "@/components/icons";
 
 type Icon = ComponentType<IconProps>;
+
+const ICONS: Record<LandingIcon, Icon> = {
+  router: IconRouter,
+  mpesa: IconMpesa,
+  growth: IconPulse,
+  shield: IconShield,
+  ticket: IconTicket,
+  users: IconUsers,
+  whatsapp: IconWhatsApp,
+  invoice: IconInvoice,
+  lock: IconLock,
+  message: IconMessage,
+  globe: IconGlobe,
+};
+const iconFor = (name: string): Icon => ICONS[name as LandingIcon] ?? IconCheck;
 
 // ---------------------------------------------------------------------------------------------
 // Copy. Every capability named below exists in this codebase — see the file noted beside each.
@@ -43,129 +58,88 @@ const INTEGRATIONS = [
 /** Also supported, shown smaller so the headline row stays focused. */
 const MORE_INTEGRATIONS = ["Paystack", "Pesapal", "Africa's Talking SMS", "WireGuard"];
 
-const FEATURES: { title: string; body: string; icon: Icon; mpesa?: boolean }[] = [
-  {
-    title: "Subscriber Management",
-    body: "Customer profiles, packages, account status and history in one place — with suspension and reactivation handled for you.",
-    icon: IconUsers,
-  },
-  {
-    title: "Automated Billing",
-    body: "Renewal invoices, overdue reminders and suspensions run on schedule. Wallets and pro-rated first invoices included.",
-    icon: IconInvoice,
-  },
-  {
-    title: "M-Pesa Payments",
-    body: "STK Push, Paybill and Till. Payments are matched to the right account and service is restored automatically.",
-    icon: IconMpesa,
-    mpesa: true,
-  },
-  {
-    title: "Network Management",
-    body: "Connect MikroTik routers with a single setup script. Manage PPPoE, IP pools, VLANs and RADIUS from the dashboard.",
-    icon: IconRouter,
-  },
-  {
-    title: "Hotspot & Vouchers",
-    body: "Sell time and data packages on a branded captive portal, and print voucher batches for walk-in customers.",
-    icon: IconTicket,
-  },
-  {
-    title: "Reports & Analytics",
-    body: "Revenue, outstanding balances and bandwidth usage from your real billing and session records.",
-    icon: IconPulse,
-  },
-];
-
-const SHOWCASE_POINTS = [
-  "Real-time subscriber, session and payment tracking",
-  "M-Pesa STK Push, Paybill and Till integration",
-  "MikroTik and FreeRADIUS support",
-  "Hotspot and PPPoE management",
-  "Multi-tenant, with your own branding and domain",
-  "Reports, audit logs and role-based staff access",
-];
-
-const STEPS = [
-  { title: "Connect Your Network", body: "Paste one setup script into your MikroTik to link it to MashupHost." },
-  { title: "Add Subscribers", body: "Create customer accounts for PPPoE and hotspot users." },
-  { title: "Set Packages", body: "Define speeds, prices and billing cycles for what you sell." },
-  { title: "Automate Billing", body: "Invoices, reminders and suspensions run on their own." },
-  { title: "Get Paid & Grow", body: "Collect through M-Pesa and track revenue as it lands." },
-];
-
-const PLAN_INCLUDES = [
-  "Subscriber and package management",
-  "Automated invoicing and reminders",
-  "M-Pesa STK Push, Paybill and Till",
-  "MikroTik and RADIUS integration",
-  "Hotspot captive portal and vouchers",
-  "Reports and audit logs",
-];
-
-/** What a subscriber gets. Every item is a shipped surface: apps/web/src/app/hotspot (captive
- *  portal), components/customer-portal.tsx (bills + M-Pesa self-pay), the worker's invoice and
- *  dunning emails, packages/whatsapp (service status messages). */
-const CUSTOMER_POINTS: { title: string; body: string; icon: Icon; bullets: string[] }[] = [
-  {
-    title: "Branded captive portal",
-    body: "Walk-in customers connect to your Wi-Fi, pick a package and pay by M-Pesa — online in seconds, no voucher paper needed.",
-    icon: IconTicket,
-    bullets: ["Your logo, colours and support number", "Reconnects the same phone automatically", "Works on a MikroTik you already own"],
-  },
-  {
-    title: "Customer portal",
-    body: "Monthly subscribers sign in to see whether their internet is on, what they owe, and pay it from their phone.",
-    icon: IconUsers,
-    bullets: ["Pay an invoice with one M-Pesa prompt", "Service restored within a minute of paying", "Raise a support request and get replies"],
-  },
-  {
-    title: "Messages that land",
-    body: "Invoices, reminders and service updates go out by email, SMS and WhatsApp on their own — you only step in when you want to.",
-    icon: IconWhatsApp,
-    bullets: ["New invoices emailed automatically", "Due-soon, overdue and final notices", "WhatsApp when service is activated or restored"],
-  },
-];
-
-const OPERATOR_POINTS: { title: string; body: string; icon: Icon }[] = [
-  {
-    title: "Your money, your choice",
-    body: "Collect straight into your own Paybill or Till, or let MashupHost collect and settle to you.",
-    icon: IconMpesa,
-  },
-  {
-    title: "Works with routers you own",
-    body: "No proprietary hardware. MikroTik RouterOS v6 and v7, configured by script.",
-    icon: IconRouter,
-  },
-  {
-    title: "Role-based access",
-    body: "Give technicians, cashiers and admins only the permissions they need.",
-    icon: IconShield,
-  },
-  {
-    title: "Every action on record",
-    body: "An audit log of who changed what, and when, across your workspace.",
-    icon: IconLayers,
-  },
-  {
-    title: "Encrypted credentials",
-    body: "M-Pesa and payment gateway credentials are encrypted at rest.",
-    icon: IconLock,
-  },
-  {
-    title: "Your brand, your domain",
-    body: "Your logo and colours on the customer and hotspot portals, served on your own domain.",
-    icon: IconGlobe,
-  },
-];
-
 /** Set to a plan name to give it the highlighted treatment. Left unset on purpose: there is no
  *  sales data in the project saying which plan most customers choose, and a "Most popular" badge
  *  is a factual claim. */
 const FEATURED_PLAN: string | null = null;
 
 // ---------------------------------------------------------------------------------------------
+
+/** One feature group. On phones only the first three points show until "Show more" is
+ *  tapped, so the section isn't several screens long; from `sm` up every point is visible. */
+function FeatureGroupCard({ group }: { group: LandingSections["featureGroups"][number] }) {
+  const { title, body, mpesa, bullets } = group;
+  const FeatureIcon = iconFor(group.icon);
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="rounded-lg border border-slate-200 bg-white p-5 sm:p-6">
+      <div className="flex items-center gap-3">
+        <span
+          className={`grid h-10 w-10 shrink-0 place-items-center rounded-md border ${
+            mpesa ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-blue-100 bg-blue-50 text-blue-700"
+          }`}
+        >
+          <FeatureIcon size={20} aria-hidden="true" />
+        </span>
+        <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-600">{body}</p>
+      <ul className="mt-4 grid gap-2 sm:grid-cols-2 md:grid-cols-1 xl:grid-cols-2">
+        {bullets.map((b, i) => (
+          <li key={b} className={`gap-2 text-sm text-slate-700 ${i >= 3 && !open ? "hidden sm:flex" : "flex"}`}>
+            <IconCheck size={16} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+            {b}
+          </li>
+        ))}
+      </ul>
+      {bullets.length > 3 && (
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="mt-3 text-sm font-semibold text-blue-700 sm:hidden">
+          {open ? "Show less" : `Show ${bullets.length - 3} more`}
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** Remote WinBox through the platform, and the two VLANs behind a router. */
+function NetworkDiagram() {
+  return (
+    <svg viewBox="0 0 520 300" role="img" aria-label="You connect WinBox to MashupHost, which reaches the router through its tunnel; behind the router a switch carries a hotspot VLAN and a PPPoE VLAN." className="h-auto w-full">
+      <g fontFamily="inherit" fontSize="12">
+        <rect x="10" y="20" width="130" height="54" rx="8" fill="#1e293b" stroke="#475569" />
+        <text x="75" y="44" textAnchor="middle" fill="#f8fafc" fontWeight="600">You, in WinBox</text>
+        <text x="75" y="61" textAnchor="middle" fill="#94a3b8" fontSize="10">office or phone</text>
+
+        <line x1="140" y1="47" x2="200" y2="47" stroke="#94a3b8" strokeWidth="2" />
+        <rect x="200" y="20" width="130" height="54" rx="8" fill="#1d4ed8" />
+        <text x="265" y="44" textAnchor="middle" fill="#fff" fontWeight="600">MashupHost</text>
+        <text x="265" y="61" textAnchor="middle" fill="#bfdbfe" fontSize="10">relay + billing</text>
+
+        <path d="M330 47 H400 V110" fill="none" stroke="#34d399" strokeWidth="3" strokeDasharray="6 5" />
+        <text x="410" y="80" fill="#6ee7b7" fontSize="10">encrypted tunnel</text>
+        <text x="410" y="94" fill="#6ee7b7" fontSize="10">(works behind NAT)</text>
+
+        <rect x="335" y="110" width="130" height="54" rx="8" fill="#1e293b" stroke="#60a5fa" />
+        <text x="400" y="134" textAnchor="middle" fill="#f8fafc" fontWeight="600">Your MikroTik</text>
+        <text x="400" y="151" textAnchor="middle" fill="#94a3b8" fontSize="10">SIM or fibre</text>
+
+        <line x1="400" y1="164" x2="400" y2="190" stroke="#fbbf24" strokeWidth="3" />
+        <rect x="335" y="190" width="130" height="36" rx="8" fill="#1e293b" stroke="#475569" />
+        <text x="400" y="213" textAnchor="middle" fill="#f8fafc">Switch</text>
+
+        <line x1="360" y1="226" x2="250" y2="250" stroke="#34d399" strokeWidth="2" />
+        <rect x="150" y="244" width="150" height="46" rx="8" fill="#064e3b" stroke="#34d399" />
+        <text x="225" y="264" textAnchor="middle" fill="#ecfdf5" fontWeight="600">Hotspot VLAN</text>
+        <text x="225" y="280" textAnchor="middle" fill="#a7f3d0" fontSize="10">Wi-Fi, M-Pesa login</text>
+
+        <line x1="440" y1="226" x2="440" y2="244" stroke="#38bdf8" strokeWidth="2" />
+        <rect x="360" y="244" width="150" height="46" rx="8" fill="#0c4a6e" stroke="#38bdf8" />
+        <text x="435" y="264" textAnchor="middle" fill="#f0f9ff" fontWeight="600">PPPoE VLAN</text>
+        <text x="435" y="280" textAnchor="middle" fill="#bae6fd" fontSize="10">home and business lines</text>
+      </g>
+    </svg>
+  );
+}
 
 function SectionHeading({
   eyebrow,
@@ -220,8 +194,9 @@ function formatKes(amount: number): string {
   return new Intl.NumberFormat("en-KE").format(amount);
 }
 
-export function LandingClient({ initialContent }: { initialContent?: LandingContent }) {
+export function LandingClient({ initialContent, sections: givenSections }: { initialContent?: LandingContent; sections?: LandingSections }) {
   const content = initialContent ?? DEFAULT_LANDING_CONTENT;
+  const sections = givenSections ?? DEFAULT_LANDING_SECTIONS;
   const { hero, pricing, faqs, footer } = content;
   const [annual, setAnnual] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
@@ -278,7 +253,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                 </SecondaryButton>
               </div>
               <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
-                {["Easy Setup", "No Long Contracts", "Kenya Support"].map((item) => (
+                {sections.heroTicks.map((item) => (
                   <li key={item} className="flex items-center gap-2">
                     <IconCheck size={16} className="text-emerald-600" aria-hidden="true" />
                     {item}
@@ -317,37 +292,46 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
 
         {/* -------------------------------------------------------------- FEATURES */}
         <section id="features" aria-labelledby="features-title" className="scroll-mt-20">
-          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <SectionHeading
               id="features-title"
               eyebrow="Features"
               title="Everything You Need to Run and Grow Your ISP"
-              body="The billing, payments and network tools a Kenyan ISP uses every day — connected, so nothing is re-typed."
+              body="Network, billing, growth and your team — the tools a Kenyan ISP uses every day, connected so nothing is typed twice."
             />
-            <ul className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {FEATURES.map(({ title, body, icon: FeatureIcon, mpesa }) => (
-                <li
-                  key={title}
-                  className="group rounded-lg border border-slate-200 bg-white p-6 transition-[border-color,box-shadow] duration-200 hover:border-slate-300 hover:shadow-[0_8px_24px_-12px_rgba(15,23,42,0.18)]"
-                >
-                  <span
-                    className={`grid h-10 w-10 place-items-center rounded-md border ${
-                      mpesa ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-blue-100 bg-blue-50 text-blue-700"
-                    }`}
-                  >
-                    <FeatureIcon size={20} aria-hidden="true" />
-                  </span>
-                  <h3 className="mt-5 text-base font-semibold text-slate-950">{title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
-                </li>
+            <ul className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-2">
+              {sections.featureGroups.map((group) => (
+                <FeatureGroupCard key={group.title} group={group} />
               ))}
             </ul>
           </div>
         </section>
 
+        {/* --------------------------------------------------------- NETWORK HIGHLIGHT */}
+        <section id="network" aria-labelledby="network-title" className="scroll-mt-20 border-t border-slate-200 bg-slate-950 text-white">
+          <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-14 sm:px-6 sm:py-24 lg:grid-cols-2 lg:gap-16 lg:px-8">
+            <div>
+              <p className="text-sm font-semibold text-blue-300">{sections.network.eyebrow}</p>
+              <h2 id="network-title" className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+                {sections.network.title}
+              </h2>
+              <p className="mt-4 text-base leading-7 text-slate-300">{sections.network.body}</p>
+              <ul className="mt-6 space-y-3 text-sm text-slate-200">
+                {sections.network.bullets.map((b) => (
+                  <li key={b} className="flex gap-2.5">
+                    <IconCheck size={17} className="mt-0.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                    {b}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <NetworkDiagram />
+          </div>
+        </section>
+
         {/* -------------------------------------------------------------- SHOWCASE */}
         <section id="product" aria-labelledby="product-title" className="scroll-mt-20 border-y border-slate-200 bg-slate-50">
-          <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-20 sm:px-6 sm:py-28 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16 lg:px-8">
+          <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 sm:py-28 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16 lg:px-8">
             <div>
               <SectionHeading
                 id="product-title"
@@ -356,7 +340,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                 body="From subscriber management to payments and reporting, MashupHost gives you full control of your ISP business."
               />
               <ul className="mt-8 space-y-3.5">
-                {SHOWCASE_POINTS.map((point) => (
+                {sections.showcasePoints.map((point) => (
                   <li key={point} className="flex gap-3 text-[15px] text-slate-700">
                     <IconCheck size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
                     {point}
@@ -369,7 +353,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                 </Link>
               </div>
             </div>
-            <div className="min-w-0">
+            <div className="hidden min-w-0 sm:block">
               <DashboardCustomersPreview />
             </div>
           </div>
@@ -377,22 +361,24 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
 
         {/* ------------------------------------------------------- FOR YOUR CUSTOMERS */}
         <section id="customers" aria-labelledby="customers-title" className="scroll-mt-20 border-b border-slate-200">
-          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <SectionHeading
               id="customers-title"
               eyebrow="For your customers"
               title="Self-service that keeps them paying"
               body="Your subscribers see your brand, not ours: a captive portal to buy Wi-Fi, a portal to pay bills, and messages that arrive where they already are."
             />
-            <ul className="mt-14 grid gap-4 md:grid-cols-3">
-              {CUSTOMER_POINTS.map(({ title, body, icon: PointIcon, bullets }) => (
+            <ul className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-3">
+              {sections.customerPoints.map(({ title, body, icon, bullets }) => {
+                const PointIcon = iconFor(icon);
+                return (
                 <li key={title} className="rounded-lg border border-slate-200 bg-white p-6">
                   <span className="grid h-10 w-10 place-items-center rounded-md border border-blue-100 bg-blue-50 text-blue-700">
                     <PointIcon size={20} aria-hidden="true" />
                   </span>
                   <h3 className="mt-5 text-base font-semibold text-slate-950">{title}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
-                  <ul className="mt-4 space-y-2">
+                  <ul className="mt-4 hidden space-y-2 sm:block">
                     {bullets.map((b) => (
                       <li key={b} className="flex gap-2 text-sm text-slate-700">
                         <IconCheck size={16} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
@@ -401,20 +387,21 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                     ))}
                   </ul>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         </section>
 
         {/* ---------------------------------------------------------- HOW IT WORKS */}
         <section aria-labelledby="how-title">
-          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <SectionHeading id="how-title" eyebrow="How it works" title="Live in five steps" align="center" />
             <ol className="relative mt-14 grid gap-0 lg:grid-cols-5 lg:gap-6">
-              {STEPS.map((step, i) => (
+              {sections.steps.map((step, i) => (
                 <li key={step.title} className="relative flex gap-5 pb-10 last:pb-0 lg:block lg:pb-0">
                   {/* Connector: vertical on mobile, horizontal on desktop */}
-                  {i < STEPS.length - 1 && (
+                  {i < sections.steps.length - 1 && (
                     <>
                       <span aria-hidden="true" className="absolute left-5 top-11 bottom-1 w-px bg-slate-200 lg:hidden" />
                       <span aria-hidden="true" className="absolute left-14 right-0 top-5 hidden h-px bg-slate-200 lg:block" />
@@ -435,7 +422,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
 
         {/* --------------------------------------------------------------- PRICING */}
         <section id="pricing" aria-labelledby="pricing-title" className="scroll-mt-20 border-y border-slate-200 bg-slate-50">
-          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <div className="flex flex-col items-start justify-between gap-8 md:flex-row md:items-end">
               <SectionHeading
                 id="pricing-title"
@@ -523,7 +510,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                   </p>
                 </div>
                 <ul className="grid flex-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-                  {PLAN_INCLUDES.map((item) => (
+                  {sections.planIncludes.map((item) => (
                     <li key={item} className="flex gap-2.5 text-sm text-slate-700">
                       <IconCheck size={17} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
                       {item}
@@ -537,15 +524,17 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
 
         {/* ---------------------------------------------------- BUILT FOR OPERATORS */}
         <section id="about" aria-labelledby="about-title" className="scroll-mt-20">
-          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <SectionHeading
               id="about-title"
               eyebrow="Built for ISP operators"
               title="Made for the way Kenyan ISPs actually work"
               body="MashupHost is built around M-Pesa, MikroTik and the day-to-day of running a network in Kenya — not adapted from software made for somewhere else."
             />
-            <ul className="mt-14 grid gap-x-10 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
-              {OPERATOR_POINTS.map(({ title, body, icon: PointIcon }) => (
+            <ul className="mt-10 grid gap-x-10 gap-y-6 sm:mt-14 sm:grid-cols-2 sm:gap-y-10 lg:grid-cols-3">
+              {sections.operatorPoints.map(({ title, body, icon }) => {
+                const PointIcon = iconFor(icon);
+                return (
                 <li key={title} className="flex gap-4">
                   <PointIcon size={20} className="mt-0.5 shrink-0 text-blue-700" aria-hidden="true" />
                   <div>
@@ -553,7 +542,8 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
                     <p className="mt-1.5 text-sm leading-6 text-slate-600">{body}</p>
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         </section>
@@ -561,7 +551,7 @@ export function LandingClient({ initialContent }: { initialContent?: LandingCont
         {/* ------------------------------------------------------------------- FAQ */}
         {faqs.length > 0 && (
           <section aria-labelledby="faq-title" className="border-t border-slate-200">
-            <div className="mx-auto grid max-w-7xl gap-10 px-4 py-20 sm:px-6 sm:py-28 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)] lg:px-8">
+            <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 sm:py-28 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)] lg:px-8">
               <div>
                 <SectionHeading id="faq-title" eyebrow="FAQ" title="Questions, answered" />
                 <p className="mt-4 text-sm leading-6 text-slate-600">

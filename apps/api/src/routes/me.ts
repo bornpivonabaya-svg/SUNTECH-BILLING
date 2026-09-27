@@ -23,6 +23,7 @@ import { resolveTenant } from "../plugins/tenant.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { resolveAccountHolderOrThrow, resolveMyAccountOrThrow, resolveMyCustomerOrThrow, resolvePayingCustomerOrThrow } from "../lib/my-account.js";
+import { answerSupportMessage, closeSupportChat, getAiAssistantConfigStatus, getSupportChat, requestHumanHandover, ticketRef } from "@mashupkgrid/ai";
 import { initiateStkPushForCustomer, getStkRequestOrThrow, queryAndReconcileStkRequest } from "@mashupkgrid/payments";
 import { getReferralSummary, getPauseAllowance, pauseSubscription, resumeSubscription, listAddOns, listPurchasesForCustomer, buyAddOn, activatePaidAddOns, cancelUnstartedPurchase } from "@mashupkgrid/billing";
 
@@ -169,6 +170,42 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       reply.status(201).send(successResponse({ purchaseId: purchase.id, checkoutRequestId: stkRequest.checkoutRequestId, amountMinor }, request.id));
     }
   );
+
+  // --- Support assistant: answers from the customer's own account; hands over to a ticket.
+
+  app.get("/support-chat", { config: { audience: "customer" }, preHandler: [...preHandler] }, async (request, reply) => {
+    const customer = await resolveMyCustomerOrThrow(request);
+    const [status, chat] = await Promise.all([getAiAssistantConfigStatus(customer.tenantId), getSupportChat(customer.tenantId, customer.id)]);
+    reply.send(
+      successResponse(
+        {
+          enabled: status.configured && status.isActive,
+          status: chat?.status ?? null,
+          ticketRef: chat?.ticketId ? ticketRef(chat.ticketId) : null,
+          messages: (chat?.messages ?? []).map((m) => ({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })),
+        },
+        request.id
+      )
+    );
+  });
+
+  app.post("/support-chat", { config: { audience: "customer" }, preHandler: [...preHandler] }, async (request, reply) => {
+    const customer = await resolveMyCustomerOrThrow(request);
+    const { message } = z.object({ message: z.string().trim().min(1).max(4000) }).parse(request.body);
+    const result = await answerSupportMessage({ tenantId: customer.tenantId, customerId: customer.id, channel: "APP", message, authorUserId: request.user!.id });
+    reply.send(successResponse(result, request.id));
+  });
+
+  app.post("/support-chat/human", { config: { audience: "customer" }, preHandler: [...preHandler] }, async (request, reply) => {
+    const customer = await resolveMyCustomerOrThrow(request);
+    reply.send(successResponse(await requestHumanHandover(customer.tenantId, customer.id, "APP"), request.id));
+  });
+
+  app.post("/support-chat/new", { config: { audience: "customer" }, preHandler: [...preHandler] }, async (request, reply) => {
+    const customer = await resolveMyCustomerOrThrow(request);
+    await closeSupportChat(customer.tenantId, customer.id, "APP");
+    reply.send(successResponse({ closed: true }, request.id));
+  });
 
   /** The signed-in customer's own referral code and what it has earned them. */
   app.get("/referral", { config: { audience: "customer" }, preHandler: [...preHandler] }, async (request, reply) => {

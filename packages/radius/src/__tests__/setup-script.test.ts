@@ -135,3 +135,36 @@ describe("WinBox access script", () => {
     expect(managementSources({ managementSource: "evil;/system reset", vpnSubnet: "10.90.0.0/16" })).toEqual(["10.90.0.0/16", "192.168.88.0/24"]);
   });
 });
+
+describe("router setup script — RouterOS version chosen when adding the router", () => {
+  const base = { serverPublicKey: "SERVERPUBLICKEYAAAAAAAAAAAAAAAAAAAAAAAAAAA=", loginTemplateUrl: "https://api.example.com/t" };
+
+  it("v6: no WireGuard, v6 NTP syntax, and a warning if the router runs something else", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, routerOsMajor: 6 });
+    expect(script).not.toContain("/interface wireguard");
+    expect(script).toContain("server-dns-names=pool.ntp.org,time.google.com");
+    expect(script).not.toContain("/system ntp client servers add");
+    expect(script).toContain('# RouterOS version: made for v6');
+    expect(script).toContain(':if ([:pick [/system resource get version] 0 1] != "6") do={');
+    expect(script).not.toContain("/interface wifi set");
+  });
+
+  it("v7: WireGuard, v7 NTP servers and the newer wifi radio", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, routerOsMajor: 7 });
+    expect(script).toContain("/interface wireguard add name=mkg-wg");
+    expect(script).toContain("/system ntp client servers add address=pool.ntp.org");
+    expect(script).not.toContain("server-dns-names");
+    expect(script).toContain('!= "7") do={');
+    expect(script).toContain("/interface wifi set [find default-name=wifi1]");
+    expect(script).not.toContain("/interface wireless set wlan1");
+  });
+
+  it("not chosen: detects on the router and carries both variants", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, base);
+    expect(script).toContain("# RouterOS version: detected on the router");
+    expect(script).toContain("server-dns-names=");
+    expect(script).toContain("/system ntp client servers add");
+    expect(script).toContain("/interface wireguard add name=mkg-wg");
+    expect(script).not.toContain("WARNING: MASHUPKGRID");
+  });
+});

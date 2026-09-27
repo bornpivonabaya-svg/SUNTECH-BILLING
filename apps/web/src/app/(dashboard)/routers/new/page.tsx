@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiRequestError } from "@/lib/api-client";
+import { tr } from "@/lib/tr";
 import { Button, Card, ErrorText, HintText, Input, Label } from "@/components/ui";
 import { CodeBlock, Notice, PageHeader, Pill } from "@/components/dashboard/surface";
 import { IconCheck, IconChevronRight, IconRouter } from "@/components/icons";
@@ -71,6 +72,7 @@ export default function LinkRouterWizardPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
+  const [routerOsMajor, setRouterOsMajor] = useState<6 | 7 | null>(null);
   const [created, setCreated] = useState<RouterRecord | null>(null);
   const [provisionToken, setProvisionToken] = useState<string | null>(null);
   const [provisioningScript, setProvisioningScript] = useState<string | null>(null);
@@ -131,6 +133,7 @@ export default function LinkRouterWizardPage() {
         method: "POST",
         body: JSON.stringify({
           name,
+          routerOsMajor,
           hotspotPorts,
           lanPort: lanPort && lanPort !== "none" ? lanPort : null,
           ...(pppoeEnabled && pppoeInterface.trim()
@@ -267,6 +270,34 @@ export default function LinkRouterWizardPage() {
               required
             />
             <HintText>How this router is shown across the dashboard.</HintText>
+            <div className="mt-4">
+              <Label>{tr("RouterOS version")}</Label>
+              <div className="mt-1 flex flex-wrap gap-2" role="radiogroup" aria-label={tr("RouterOS version")}>
+                {([
+                  { v: null, label: tr("Not sure (detect)") },
+                  { v: 6, label: "RouterOS v6" },
+                  { v: 7, label: "RouterOS v7" },
+                ] as const).map((o) => (
+                  <button
+                    key={String(o.v)}
+                    type="button"
+                    role="radio"
+                    aria-checked={routerOsMajor === o.v}
+                    onClick={() => setRouterOsMajor(o.v)}
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                      routerOsMajor === o.v
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-obsidian-700 dark:bg-obsidian-950 dark:text-slate-200"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <HintText>
+                {tr("In WinBox: System > Resources > Version. v6 routers get no WireGuard remote access; v7 gets it and the newer Wi-Fi settings. If the router runs a different version, the script says so on screen and in the router's log.")}
+              </HintText>
+            </div>
             {/* Interactive Port Selection */}
             <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-obsidian-800 dark:bg-obsidian-900/50">
               <div className="flex items-center gap-2">

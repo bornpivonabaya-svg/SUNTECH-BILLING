@@ -1,4 +1,5 @@
 import { prisma } from "@mashupkgrid/database";
+import { resolveTenantPreferences } from "@mashupkgrid/shared";
 
 /**
  * Platform-wide walled garden: what a hotspot customer can reach before they have paid.
@@ -48,4 +49,24 @@ export async function listPlatformWalledGardenHosts(): Promise<string[]> {
     console.warn("[walled-garden] could not load platform hosts:", err instanceof Error ? err.message : err);
     return [];
   }
+}
+
+/** The hosts one ISP added for its own hotspot customers, re-checked on the way out so an entry
+ *  that slipped in some other way still can't open the paywall. */
+export async function listTenantWalledGardenHosts(tenantId: string): Promise<string[]> {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { preferences: true } });
+    return resolveTenantPreferences(tenant?.preferences)
+      .walledGarden.hosts.map(normalizeWalledGardenHost)
+      .filter((h): h is string => h !== null);
+  } catch (err) {
+    console.warn("[walled-garden] could not load tenant hosts:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/** Everything a router of this ISP should let through before payment, beyond the built-ins. */
+export async function listWalledGardenHostsFor(tenantId: string): Promise<string[]> {
+  const [platform, own] = await Promise.all([listPlatformWalledGardenHosts(), listTenantWalledGardenHosts(tenantId)]);
+  return [...new Set([...platform, ...own])];
 }
