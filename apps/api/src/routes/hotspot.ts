@@ -13,6 +13,8 @@ import { createTicket } from "@mashupkgrid/support";
 import {
   initiateHotspotPurchaseStkPush,
   queryAndReconcileStkRequest,
+  isStkRequestOpen,
+  STK_STILL_PROCESSING,
   initiatePaystackHotspotPurchase,
   verifyAndReconcilePaystackTransaction,
   initiatePesapalHotspotPurchase,
@@ -636,7 +638,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!req) throw new NotFoundError("Payment request");
 
-      if (req.status === "PENDING") {
+      if (isStkRequestOpen(req)) {
         try {
           const res = await queryAndReconcileStkRequest(tenant.id, checkoutRequestId);
           req = res.request;
@@ -1000,7 +1002,8 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
         const pendingStk = await prisma.mpesaStkRequest.findFirst({
           where: {
             tenantId: tenant.id,
-            status: "PENDING",
+            // Also a request an older version marked failed on "still under processing".
+            OR: [{ status: "PENDING" }, { status: "FAILED", resultCode: STK_STILL_PROCESSING }],
             phone,
             createdAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
           },
