@@ -637,6 +637,17 @@ export class MikroTikAdapter implements NetworkDeviceAdapter {
       changes.push("downloaded hotspot/login.html");
     }
 
+    // The branded "you're online" page (routers set up before it existed don't have it).
+    const aloginPage = await client.print(["/file/print", "?name=hotspot/alogin.html"]);
+    if (aloginPage.length === 0) {
+      const aloginUrl = opts.loginTemplateUrl.replace(/mikrotik-login-template(\?|$)/, "mikrotik-alogin-template$1");
+      assertNoTrap(
+        await client.talk(["/tool/fetch", `=url=${aloginUrl}`, "=dst-path=hotspot/alogin.html", "=check-certificate=no"]),
+        "/tool/fetch alogin.html"
+      );
+      changes.push("downloaded hotspot/alogin.html");
+    }
+
     const servers = await client.print(["/radius/print"]);
     const retired = new Set(opts.retiredRadiusHosts ?? []);
     for (const s of servers) {

@@ -34,7 +34,7 @@ const opts = {
 describe("router hotspot self-repair", () => {
   it("does nothing on a correctly set-up router", async () => {
     const { adapter, writes } = fakeRouter({
-      files: ["hotspot/login.html"],
+      files: ["hotspot/login.html", "hotspot/alogin.html"],
       radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }],
     });
     expect(await adapter.ensureHotspotProvisioning(opts)).toEqual([]);
@@ -44,15 +44,17 @@ describe("router hotspot self-repair", () => {
   it("downloads a missing login page and fixes RADIUS left pointing at the old server", async () => {
     const { adapter, writes } = fakeRouter({ files: [], radius: [{ ".id": "*1", address: "68.210.187.104" }] });
     const changes = await adapter.ensureHotspotProvisioning(opts);
-    expect(changes).toEqual(["downloaded hotspot/login.html", "removed stale RADIUS 68.210.187.104", "added RADIUS 192.168.1.183"]);
+    expect(changes).toEqual(["downloaded hotspot/login.html", "downloaded hotspot/alogin.html", "removed stale RADIUS 68.210.187.104", "added RADIUS 192.168.1.183"]);
     expect(writes[0]).toContain("=dst-path=hotspot/login.html");
-    expect(writes[1]).toEqual(["/radius/remove", "=.id=*1"]);
-    expect(writes[2]).toEqual(expect.arrayContaining(["/radius/add", "=address=192.168.1.183", "=secret=router-secret", "=comment=MASHUPKGRID"]));
+    expect(writes[1]).toContain("=dst-path=hotspot/alogin.html");
+    expect(writes[1]!.some((w) => w.includes("mikrotik-alogin-template"))).toBe(true);
+    expect(writes[2]).toEqual(["/radius/remove", "=.id=*1"]);
+    expect(writes[3]).toEqual(expect.arrayContaining(["/radius/add", "=address=192.168.1.183", "=secret=router-secret", "=comment=MASHUPKGRID"]));
   });
 
   it("lets customers reach the portal and API before login (walled garden)", async () => {
     const { adapter, writes } = fakeRouter({
-      files: ["hotspot/login.html"],
+      files: ["hotspot/login.html", "hotspot/alogin.html"],
       radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }],
       walledIp: [{ "dst-host": "captive.mashuphost.tech" }],
     });
@@ -65,7 +67,7 @@ describe("router hotspot self-repair", () => {
 
   it("leaves RADIUS servers the operator added themselves alone", async () => {
     const { adapter, writes } = fakeRouter({
-      files: ["hotspot/login.html"],
+      files: ["hotspot/login.html", "hotspot/alogin.html"],
       radius: [
         { ".id": "*1", address: "10.0.0.5", comment: "office NPS" },
         { ".id": "*2", address: "192.168.1.183", comment: "MASHUPKGRID" },

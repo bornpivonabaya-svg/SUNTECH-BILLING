@@ -168,3 +168,11 @@ describe("router setup script — RouterOS version chosen when adding the router
     expect(script).not.toContain("WARNING: MASHUPKGRID");
   });
 });
+
+describe("router setup script — the 'you're online' page", () => {
+  it("downloads alogin.html next to login.html and repairs both", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { loginTemplateUrl: "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template" });
+    expect(script).toContain('url="https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-alogin-template" dst-path=hotspot/alogin.html');
+    expect(script).toMatch(/mkg-portal-page.*hotspot\/login\.html.*hotspot\/alogin\.html/);
+  });
+});

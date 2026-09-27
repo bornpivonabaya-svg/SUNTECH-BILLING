@@ -319,6 +319,8 @@ export function buildMikrotikProvisioningScript(
     options.pppoePoolRange
   );
   const loginTemplateUrl = options.loginTemplateUrl || "https://api.mashuphost.tech/api/v1/hotspot/demo-isp/mikrotik-login-template";
+  // The "you're online" page shown after a successful sign-in, served next to the login page.
+  const aloginTemplateUrl = aloginUrlFor(loginTemplateUrl);
   const apiHost = hostFromUrl(loginTemplateUrl);
   const portalHost = options.portalHost ? hostFromUrl(options.portalHost) : "captive.mashuphost.tech";
   // App-only customers must still reach the portal (to buy full internet) and the API behind it.
@@ -428,11 +430,12 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}
+:do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
 
 # Self-repair for the branded login page: if hotspot/login.html is ever missing (a setup cut short,
 # a reset of the hotspot folder), customers get MikroTik's stock sign-in page instead of the portal.
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
-:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}"} on-error={}
+:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0) do={:do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}}; :if ([:len [/file find name=\\"hotspot/alogin.html\\"]] = 0) do={:do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
 # Persistent check-in. It survives normal reboots and is safe to re-run.
 :do {/system scheduler remove [find name=mkg-heartbeat]} on-error={}
@@ -463,6 +466,11 @@ ${osMajor === 7 ? "" : `:do {/interface wireless set wlan1 disabled=no mode=ap-b
 `;
 
   return wrapTopLevelCommands(minimalProvisioningScript);
+}
+
+/** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */
+export function aloginUrlFor(loginTemplateUrl: string): string {
+  return loginTemplateUrl.replace(/mikrotik-login-template(\?|$)/, "mikrotik-alogin-template$1");
 }
 
 /** Opening lines naming the RouterOS version the script was made for, and a check that warns

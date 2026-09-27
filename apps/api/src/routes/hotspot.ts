@@ -1,3 +1,4 @@
+import { buildAloginPage } from "../lib/router-pages.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@mashupkgrid/database";
@@ -756,6 +757,24 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
         .send(`${buildAppFilterSection({ portalHosts: appFilterPortalHosts() })}
 :log info "MASHUPKGRID per-app filter installed"
 `);
+    }
+  );
+
+  /**
+   * hotspot/alogin.html — what the router shows right after a successful sign-in. MikroTik's stock
+   * page ("You are logged in / If nothing happens, click here") reads like something is stuck, and
+   * Android keeps its "Sign in to …" window open on it. This one says plainly that the customer is
+   * online, shows the time left (the router fills in $(session-time-left)), tells them they can
+   * close the window, and then sends the window on to the page they first asked for, which is how
+   * Android and iPhone notice the internet works and close their sign-in window by themselves.
+   */
+  app.get(
+    "/:tenantSlug/mikrotik-alogin-template",
+    { config: { audience: "customer" }, preHandler: [checkMaintenance] },
+    async (request, reply) => {
+      const { tenantSlug } = tenantParamsSchema.parse(request.params);
+      const tenant = await resolveTenantBySlug(tenantSlug);
+      reply.header("Content-Type", "text/html; charset=utf-8").send(buildAloginPage(tenant.name));
     }
   );
 
