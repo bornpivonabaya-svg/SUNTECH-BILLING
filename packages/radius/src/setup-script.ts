@@ -533,6 +533,9 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // Every hotspot profile: RADIUS on, and pointed at a folder that really has the sign-in page.
     `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; :if ([:len [/file find name=($dir . "/login.html")]] = 0) do={:if ([:len [/file find name="flash/hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=flash/hotspot} else={:if ([:len [/file find name="hotspot/login.html"]] > 0) do={/ip hotspot profile set $p html-directory=hotspot}}}; :if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`,
     `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
+    // An empty or cut-off sign-in page (a download interrupted mid-way) is removed, so the
+    // repair below fetches a fresh one: phones otherwise get no sign-in page at all.
+    `:do {:foreach f in=[/file find name~"hotspot/login.html"] do={:if ([/file get $f size] < 200) do={/file remove $f}}} on-error={}`,
     portalSelfRepair,
     // cpu-load is the last second's load, and this runs straight after the router fetched it over
     // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
@@ -556,10 +559,11 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
  * @mashupkgrid/network) without anyone typing router commands: running hotspot servers, phones
  * that reached the hotspot (hosts) and signed in (auth), DHCP leases, the DNS redirect rules,
  * sign-in page files, radios in the bridge, the portal in the walled garden, pings answered by
- * the internet, and whether DNS resolves. Left out for RouterOS 6, whose report must stay under
+ * the internet, whether DNS resolves, the hotspot's page folder and its login.html size, and the
+ * router's RADIUS counters (requests, accepts, rejects, timeouts). Left out for RouterOS 6, whose report must stay under
  * the 4 KB its fetch returns.
  */
-const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find dst-host~"mashuphost"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :set d ($d . "&hs=" . $c)} on-error={}`;
+const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find dst-host~"mashuphost"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :do {:local dir [/ip hotspot profile get [/ip hotspot get [find disabled=no] profile] html-directory]; :set c ($c . ";dir=" . $dir . ";lsize=" . [/file get [find name=($dir . "/login.html")] size])} on-error={}; :do {:local m [:parse ":return [/radius monitor 0 once as-value]"]; :local r [$m]; :set c ($c . ";rreq=" . ($r->"requests") . ";racc=" . ($r->"accepts") . ";rrej=" . ($r->"rejects") . ";rto=" . ($r->"timeouts"))} on-error={}; :set d ($d . "&hs=" . $c)} on-error={}`;
 
 /** hotspot/alogin.html sits next to the login page on the API: same path, alogin template. */
 export function aloginUrlFor(loginTemplateUrl: string): string {

@@ -284,5 +284,7 @@ describe("router health report", () => {
       expect(report).toContain(probe);
     }
     expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })).not.toContain("&hs=");
+    // A broken sign-in page is removed before the repair that refetches a missing one.
+    expect(report.indexOf("[/file get $f size] < 200")).toBeLessThan(report.indexOf("/ip hotspot reset-html"));
   });
 });
