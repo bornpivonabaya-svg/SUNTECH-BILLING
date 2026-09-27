@@ -15,7 +15,8 @@ import {
   createAdapterForRouter,
 } from "@mashupkgrid/network";
 import { prisma } from "@mashupkgrid/database";
-import { successResponse, ConflictError } from "@mashupkgrid/shared";
+import { buildVlanServiceScript } from "@mashupkgrid/radius";
+import { successResponse, ConflictError, ValidationError } from "@mashupkgrid/shared";
 import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
@@ -509,6 +510,33 @@ export async function vlanRoutes(app: FastifyInstance): Promise<void> {
       });
 
       reply.status(204).send();
+    }
+  );
+
+  /** The VLAN manual's script generator: a RouterOS script that runs a hotspot or a PPPoE server
+   *  on one VLAN (see packages/radius vlan-script). Read-only, so vlans.read is enough. */
+  app.post(
+    "/setup-script",
+    { config: { audience: "staff" as const }, preHandler: [...preHandler, requirePermission("vlans.read")] },
+    async (request, reply) => {
+      requireTenant(request.user!.tenantId);
+      const body = z
+        .object({
+          service: z.enum(["hotspot", "pppoe"]),
+          vlanTag: z.number().int(),
+          name: z.string().max(80).default(""),
+          trunkInterface: z.string().min(1).max(64),
+          subnetCidr: z.string().min(1).max(32),
+          gateway: z.string().max(15).nullable().optional(),
+          dnsServers: z.array(z.string().max(15)).max(4).optional(),
+          mtu: z.number().int().min(1280).max(9000).nullable().optional(),
+        })
+        .parse(request.body);
+      try {
+        reply.send(successResponse({ script: buildVlanServiceScript(body) }, request.id));
+      } catch (err) {
+        throw new ValidationError(err instanceof Error ? err.message : String(err));
+      }
     }
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { tr } from "@/lib/tr";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiRequestError } from "@/lib/api-client";
 import { Button, Card, ErrorText, HintText, Input, Label, Badge, StatCard } from "@/components/ui";
@@ -187,7 +189,12 @@ export default function VlansPage() {
             Network segments customers are placed on through their package.
           </HintText>
         </div>
-        <Button onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "Create VLAN"}</Button>
+        <div className="flex items-center gap-2">
+          <Link href="/vlans/guide" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-obsidian-700 dark:text-slate-200 dark:hover:bg-obsidian-800">
+            {tr("VLAN manual")}
+          </Link>
+          <Button onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "Create VLAN"}</Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

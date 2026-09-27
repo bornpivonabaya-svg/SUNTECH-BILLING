@@ -133,6 +133,7 @@ function tenantSections(has: Has): NavSection[] {
         ...(has("routers.read") ? [{ href: "/routers/walled-garden", label: "Walled garden", icon: "shield", keywords: "hotspot allowed sites before login paywall website" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/routers/backups", label: "Router backups", icon: "hard-drive", keywords: "backup restore export config rollback" } as NavItem] : []),
         ...(has("vlans.read") ? [{ href: "/vlans", label: "VLANs", icon: "layers", keywords: "segments tagging" } as NavItem] : []),
+        ...(has("vlans.read") ? [{ href: "/vlans/guide", label: "VLAN manual", icon: "scroll", keywords: "patch switch trunk access port hotspot pppoe guide how to" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/ip-pools", label: "IP pools", icon: "network", keywords: "addresses dhcp" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/network-map", label: "Network map", icon: "map", keywords: "sites map coverage where routers are" } as NavItem] : []),
         ...(has("routers.read") ? [{ href: "/network-maintenance", label: "Planned maintenance", icon: "calendar-clock", keywords: "outage downtime notify customers sms scheduled work" } as NavItem] : []),

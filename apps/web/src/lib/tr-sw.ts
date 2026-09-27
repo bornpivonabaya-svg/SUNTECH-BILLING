@@ -1002,4 +1002,5 @@ export const SW: Record<string, string> = {
   "RouterOS version the setup script is made for": "Toleo la RouterOS ambalo skripti ya usanidi imetengenezwa kwa ajili yake",
   "RouterOS: detect": "RouterOS: tambua",
   "This router was added as RouterOS v{chosen} but reports {seen}. Pick the right version above, then run its setup script again so WireGuard, NTP and Wi-Fi match.": "Ruta hii iliongezwa kama RouterOS v{chosen} lakini inaripoti {seen}. Chagua toleo sahihi hapo juu, kisha endesha skripti yake ya usanidi tena ili WireGuard, NTP na Wi-Fi zilingane.",
+  "VLAN manual": "Mwongozo wa VLAN",
 };

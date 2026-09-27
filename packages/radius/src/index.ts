@@ -7,6 +7,7 @@ export * from "./hotspot-package.service.js";
 export * from "./bandwidth-report.service.js";
 export * from "./hotspot-account-login.service.js";
 export * from "./setup-script.js";
+export * from "./vlan-script.js";
 export * from "./radius-server.js";
 export * from "./cidr.js";
 export type { Db } from "./db.js";
