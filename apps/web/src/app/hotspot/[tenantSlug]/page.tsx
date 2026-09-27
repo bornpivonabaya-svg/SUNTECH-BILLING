@@ -1099,11 +1099,22 @@ export default function HotspotCaptivePortalPage() {
         {!themeMeta.inlineHelp && (
           <>
             <div className="h-20" aria-hidden="true" />
-            <div className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-center gap-2 border-t border-slate-200/80 bg-white/95 px-3 py-2.5 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] [color-scheme:light]">
+            <div className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center justify-center gap-2 border-t border-slate-200/80 bg-white/95 px-3 py-2.5 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] [color-scheme:light]">
               <button type="button" onClick={openRecover} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
                 {t.paidNotConnectedShort}
               </button>
-              <button type="button" onClick={openSupport} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">
+              {/* Every theme gets a way in for a voucher code (bought from an agent, or sent by SMS). */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVoucherModal(true);
+                  setError(null);
+                }}
+                className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                {t.voucherShort}
+              </button>
+              <button type="button" onClick={openSupport} className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">
                 {t.help}
               </button>
             </div>
