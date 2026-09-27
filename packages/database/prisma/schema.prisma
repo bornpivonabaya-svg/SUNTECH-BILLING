@@ -158,6 +158,9 @@ model User {
   /// Staff member's home branch: the branch their lists open on. Null means all branches.
   branchId            String?
   branch              Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  /// The person's name as they gave it (ISP sign-up, staff invite). Optional: older accounts
+  /// have none, and the email stands in for it.
+  name                String?
   email               String
   phone               String?
   passwordHash        String

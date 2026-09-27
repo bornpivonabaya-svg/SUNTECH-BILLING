@@ -40,6 +40,8 @@ interface Tenant {
   collectionMode?: "OWN" | "PLATFORM";
   payoutShortcode?: string | null;
   payoutShortcodeType?: "PAYBILL" | "TILL";
+  /** The account that signed the ISP up (its earliest user). */
+  owner?: { name: string | null; email: string; phone: string | null; emailVerified: boolean; lastLoginAt: string | null } | null;
   subscription: {
     id: string;
     status: "TRIALING" | "ACTIVE" | "PAST_DUE" | "EXPIRED" | "CANCELLED";
@@ -107,6 +109,104 @@ function trialCountdown(trialEndsAt: string | null): string | null {
   return `${days}d ${hours}h left in trial`;
 }
 
+function whatsappHref(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return `https://wa.me/${digits.startsWith("0") ? `254${digits.slice(1)}` : digits}`;
+}
+
+/** Who to contact about this ISP, visible without opening "Manage". */
+function OwnerLine({ owner }: { owner: NonNullable<Tenant["owner"]> }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      <span className="font-semibold text-slate-700 dark:text-slate-200">{owner.name || "Owner"}</span>
+      <a href={`mailto:${owner.email}`} className="text-brand-600 hover:underline dark:text-brand-400">
+        {owner.email}
+      </a>
+      <button
+        type="button"
+        title="Copy email"
+        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+        onClick={() => {
+          void navigator.clipboard.writeText(owner.email);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+      </button>
+      {owner.phone && (
+        <a href={whatsappHref(owner.phone)} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline dark:text-emerald-400">
+          {owner.phone} (WhatsApp)
+        </a>
+      )}
+      {!owner.emailVerified && <span className="text-amber-600 dark:text-amber-400">email not verified</span>}
+      <span className="text-slate-400">{owner.lastLoginAt ? `last signed in ${new Date(owner.lastLoginAt).toLocaleDateString()}` : "never signed in"}</span>
+    </div>
+  );
+}
+
+/** Extend, set or end the free trial. Uses the trial endpoint, which also keeps the ISP's trial
+ *  plan in step and shows them a banner with the new date. */
+function TrialControls({ tenant, onError }: { tenant: Tenant; onError: (message: string) => void }) {
+  const queryClient = useQueryClient();
+  const [until, setUntil] = useState("");
+  const [done, setDone] = useState<string | null>(null);
+  const trial = useMutation({
+    mutationFn: (body: { action: "extend"; days: number } | { action: "set"; until: string } | { action: "end" }) =>
+      apiFetch<{ trialEndsAt: string }>(`/api/v1/platform/tenants/${tenant.id}/trial`, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: (r, body) => {
+      setDone(body.action === "end" ? "Trial ended." : `Trial now ends ${new Date(r.trialEndsAt).toLocaleString()}. The ISP sees a banner with the new date.`);
+      setUntil("");
+      void queryClient.invalidateQueries({ queryKey: ["tenants"] });
+    },
+    onError: (err) => onError(err instanceof ApiRequestError ? err.message : "Failed to change the trial"),
+  });
+  const minDate = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {[7, 14, 30].map((days) => (
+          <Button key={days} variant="secondary" className="px-2.5 py-1 text-xs" disabled={trial.isPending} onClick={() => trial.mutate({ action: "extend", days })}>
+            +{days} days
+          </Button>
+        ))}
+        <span className="text-xs text-slate-400">or until</span>
+        <input
+          type="date"
+          min={minDate}
+          value={until}
+          onChange={(e) => setUntil(e.target.value)}
+          aria-label="Trial end date"
+          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-obsidian-700 dark:bg-obsidian-950 dark:text-slate-100"
+        />
+        <Button
+          variant="secondary"
+          className="px-2.5 py-1 text-xs"
+          disabled={!until || trial.isPending}
+          onClick={() => trial.mutate({ action: "set", until: new Date(`${until}T23:59:00`).toISOString() })}
+        >
+          Set date
+        </Button>
+        <Button
+          variant="danger"
+          className="px-2.5 py-1 text-xs"
+          disabled={trial.isPending || !tenant.trialEndsAt}
+          onClick={() => {
+            if (confirm(`End ${tenant.name}'s free trial now? Their dashboard locks until they pay for a plan.`)) trial.mutate({ action: "end" });
+          }}
+        >
+          End trial now
+        </Button>
+      </div>
+      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+        Extending adds days to the current end date (or to today if it has already ended) and unlocks the ISP straight away.
+      </p>
+      {done && <p className="text-xs text-emerald-600 dark:text-emerald-400">{done}</p>}
+    </div>
+  );
+}
+
 function TenantManagePanel({ tenant, onOpenUpgrade }: { tenant: Tenant; onOpenUpgrade: () => void }) {
   const queryClient = useQueryClient();
   const [collectionMode, setCollectionMode] = useState<"OWN" | "PLATFORM">(
@@ -154,19 +254,6 @@ function TenantManagePanel({ tenant, onOpenUpgrade }: { tenant: Tenant; onOpenUp
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tenants"] }),
     onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to update feature"),
-  });
-
-  const extendTrial = useMutation({
-    mutationFn: (days: number) => {
-      const base = tenant.trialEndsAt && new Date(tenant.trialEndsAt) > new Date() ? new Date(tenant.trialEndsAt) : new Date();
-      base.setDate(base.getDate() + days);
-      return apiFetch(`/api/v1/platform/tenants/${tenant.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ trialEndsAt: base.toISOString() }),
-      });
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tenants"] }),
-    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to extend trial"),
   });
 
   const clearTrial = useMutation({
@@ -322,12 +409,12 @@ function TenantManagePanel({ tenant, onOpenUpgrade }: { tenant: Tenant; onOpenUp
               ? `${trialCountdown(tenant.trialEndsAt)} (ends ${new Date(tenant.trialEndsAt).toLocaleString()})`
               : "No trial set"}
           </span>
-          <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => extendTrial.mutate(7)}>
-            +7 days
-          </Button>
           <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => clearTrial.mutate()}>
             Mark as paid (clear trial)
           </Button>
+        </div>
+        <div className="mt-2">
+          <TrialControls tenant={tenant} onError={setError} />
         </div>
       </div>
       {/* Onboarding fee */}
@@ -553,10 +640,10 @@ export default function TenantsPage() {
   const attentionCount = allItems.filter((t) => tenantRisk(t) !== null).length;
 
   const filteredItems = allItems.filter((tenant) => {
+    const q = search.toLowerCase();
     const matchesSearch =
       search === "" ||
-      tenant.name.toLowerCase().includes(search.toLowerCase()) ||
-      tenant.slug.toLowerCase().includes(search.toLowerCase());
+      [tenant.name, tenant.slug, tenant.owner?.name, tenant.owner?.email, tenant.owner?.phone].some((v) => v?.toLowerCase().includes(q));
 
     if (!matchesSearch) return false;
 
@@ -871,7 +958,7 @@ export default function TenantsPage() {
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <Input
-            placeholder="Search tenants by name or slug..."
+            placeholder="Search by ISP, address, owner name, email or phone..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full"
@@ -927,6 +1014,7 @@ export default function TenantsPage() {
                       </span>
                     )}
                   </div>
+                  {tenant.owner && <OwnerLine owner={tenant.owner} />}
                   <p className="text-xs text-slate-400 mt-1">
                     Created {new Date(tenant.createdAt).toLocaleDateString()}
                     {countdown && (

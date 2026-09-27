@@ -7,5 +7,5 @@ export default defineCliConfig({
   },
   // `npm run deploy` publishes the Studio at https://mashuphost.sanity.studio
   studioHost: "mashuphost",
-  deployment: { autoUpdates: true },
+  deployment: { appId: "hiyvdufsmgjzyny07qtgammx", autoUpdates: true },
 });
