@@ -508,14 +508,16 @@ function heartbeatOnEvent(callbackUrl: string): string {
 export function buildHeartbeatScript(callbackUrl: string): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   return [
-    `:do {/interface bridge port add bridge=bridge interface=wlan1} on-error={}`,
-    `:do {/interface bridge port add bridge=bridge interface=wifi1} on-error={}`,
-    `:do {/interface wireless set [find name=wlan1] disabled=no mode=ap-bridge} on-error={}`,
-    `:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap} on-error={}`,
-    `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")})`,
-    `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={}`,
-    `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={}`,
-    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
+    `{`,
+    `:do {/interface bridge port add bridge=bridge interface=wlan1} on-error={};`,
+    `:do {/interface bridge port add bridge=bridge interface=wifi1} on-error={};`,
+    `:do {/interface wireless set [find name=wlan1] disabled=no mode=ap-bridge} on-error={};`,
+    `:do {/interface wifi set [find default-name=wifi1] disabled=no configuration.mode=ap} on-error={};`,
+    `:local d ("cpu=" . ${get("cpu-load")} . "&uptime=" . ${get("uptime")} . "&freemem=" . ${get("free-memory")} . "&totmem=" . ${get("total-memory")} . "&freehdd=" . ${get("free-hdd-space")} . "&tothdd=" . ${get("total-hdd-space")} . "&ver=" . ${get("version")} . "&board=" . ${get("board-name")});`,
+    `:do {:set d ($d . "&users=" . [:len [/ip hotspot active find]])} on-error={};`,
+    `:do {:local h [:parse ":return [:tostr [/system health print as-value]]"]; :set d ($d . "&health=" . [$h])} on-error={};`,
+    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no;`,
+    `}`,
     "",
   ].join("\n");
 }
