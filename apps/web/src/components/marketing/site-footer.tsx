@@ -25,8 +25,8 @@ function columns(supportEmail?: string): { title: string; links: FooterLink[] }[
         { label: "About", href: "/#about" },
         supportEmail
           ? { label: "Contact", href: `mailto:${supportEmail}`, external: true }
-          : { label: "Contact", href: whatsappLink("Hello MashupHost, I'd like to talk to your team."), external: true },
-        { label: "Support", href: whatsappLink("Hello MashupHost Support"), external: true },
+          : { label: "Contact", href: whatsappLink("Hello Suntech Billing, I'd like to talk to your team."), external: true },
+        { label: "Support", href: whatsappLink("Hello Suntech Billing Support"), external: true },
       ],
     },
     {
@@ -65,12 +65,12 @@ export function SiteFooter({
       <div className="mx-auto max-w-7xl px-4 pt-14 pb-10 sm:px-6 lg:px-8">
         <div className="grid gap-10 lg:grid-cols-[1.4fr_2.6fr]">
           <div className="max-w-sm">
-            <Link href="/" aria-label="MashupHost home" className="inline-block">
+            <Link href="/" aria-label="Suntech Billing home" className="inline-block">
               <Logo />
             </Link>
             <p className="mt-4 text-sm leading-6 text-slate-600">{description}</p>
             <a
-              href={whatsappLink("Hello MashupHost Support")}
+              href={whatsappLink("Hello Suntech Billing Support")}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-4 inline-block text-sm font-medium text-slate-900 hover:text-blue-700"

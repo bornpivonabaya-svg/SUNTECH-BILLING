@@ -18,7 +18,7 @@ function frame(title: string, bodyHtml: string): string {
       <h2 style="color: #0f172a; margin-top: 0; font-size: 20px;">${title}</h2>
       ${bodyHtml}
       <p style="font-size: 13px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 24px;">
-        MASHUPKGRID ISP · This is an automated message about your account. Reply to reach the team.
+        Suntech Billing · This is an automated message about your account. Reply to reach the team.
       </p>
     </div>
   `;
@@ -29,17 +29,17 @@ function pendingEmail(data: SendTenantWelcomeEmailJob) {
   const text = [
     `Hi ${data.ownerName},`,
     "",
-    `Thanks for registering "${data.companyName}" on MASHUPKGRID ISP.`,
+    `Thanks for registering "${data.companyName}" on Suntech Billing.`,
     "",
     "Your application is now with our team for approval. Nothing more is needed from you: you will get another email the moment it is approved, with your sign-in link.",
     "",
     `Your username will be ${data.email}, and your dashboard address will be ${data.dashboardUrl}.`,
     "",
-    "The MASHUPKGRID Team",
+    "The Suntech Billing Team",
   ].join("\n");
   const html = frame(
     `Thanks, ${escapeHtml(data.ownerName)} — we have your application`,
-    `<p style="font-size: 15px; line-height: 1.5;">Thanks for registering <strong>${escapeHtml(data.companyName)}</strong> on MASHUPKGRID ISP.</p>
+    `<p style="font-size: 15px; line-height: 1.5;">Thanks for registering <strong>${escapeHtml(data.companyName)}</strong> on Suntech Billing.</p>
      <p style="font-size: 15px; line-height: 1.5;">Your application is with our team for approval. Nothing more is needed from you — you'll get another email the moment it's approved, with your sign-in link.</p>
      <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 16px; margin: 20px 0; font-size: 14px;">
        <div style="color:#64748b">Username</div><div style="font-weight:600; margin-bottom: 8px;">${escapeHtml(data.email)}</div>
@@ -50,11 +50,11 @@ function pendingEmail(data: SendTenantWelcomeEmailJob) {
 }
 
 function approvedEmail(data: SendTenantWelcomeEmailJob) {
-  const subject = `${data.companyName} is approved — sign in to MASHUPKGRID ISP`;
+  const subject = `${data.companyName} is approved — sign in to Suntech Billing`;
   const text = [
     `Hi ${data.ownerName},`,
     "",
-    `Good news: "${data.companyName}" has been approved and is live on MASHUPKGRID ISP.`,
+    `Good news: "${data.companyName}" has been approved and is live on Suntech Billing.`,
     "",
     "--- YOUR ACCOUNT & SUBDOMAIN DETAILS ---",
     `• Organization: ${data.companyName}`,
@@ -70,7 +70,7 @@ function approvedEmail(data: SendTenantWelcomeEmailJob) {
       : "Sign in with the password you created when you registered. Use \"Forgot password\" on the sign-in page if you need to reset it.",
     "",
     "Welcome aboard,",
-    "The MASHUPKGRID Team",
+    "The Suntech Billing Team",
   ].join("\n");
 
   const html = frame(
@@ -113,7 +113,7 @@ function rejectedEmail(data: SendTenantWelcomeEmailJob) {
     "",
     "If you think this is a mistake, or you would like to reapply with more details, reply to this email.",
     "",
-    "The MASHUPKGRID Team",
+    "The Suntech Billing Team",
   ].join("\n");
   const html = frame(
     "Your application was not approved",

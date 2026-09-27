@@ -98,7 +98,7 @@ function LoginContent() {
       {/* Form column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
-          <Link href="/" aria-label="MashupHost home" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+          <Link href="/" aria-label="Suntech Billing home" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
             <Logo />
           </Link>
           {detectedTenant ? (
@@ -110,7 +110,7 @@ function LoginContent() {
             </Link>
           ) : (
             <p className="text-sm text-slate-600">
-              <span className="hidden sm:inline">New to MashupHost? </span>
+              <span className="hidden sm:inline">New to Suntech Billing? </span>
               <Link href="/register" className="font-semibold text-blue-700 hover:text-blue-800">
                 Create account
               </Link>
@@ -251,7 +251,7 @@ function LoginContent() {
         </main>
 
         <footer className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 px-5 py-5 text-xs text-slate-500 sm:justify-between sm:px-8">
-          <span>© {new Date().getFullYear()} MashupHost</span>
+          <span>© {new Date().getFullYear()} Suntech Billing</span>
           <nav aria-label="Legal" className="flex flex-wrap gap-x-4 gap-y-1">
             <Link href="/terms" className="hover:text-slate-800">Terms</Link>
             <Link href="/refund-policy" className="hover:text-slate-800">Refunds</Link>
@@ -261,11 +261,10 @@ function LoginContent() {
         </footer>
       </div>
 
-      {/* Product panel — platform sign-in only. On an ISP's own domain the visitor is that ISP's
-          staff or subscriber, and a MashupHost sales panel would be noise. */}
+      {/* Product panel — platform sign-in only. */}
       {!detectedTenant && (
         <aside className="hidden w-[46%] max-w-[760px] flex-col justify-center overflow-hidden border-l border-slate-200 bg-slate-50 px-12 py-16 lg:flex xl:px-16">
-          <p className="text-sm font-semibold text-blue-700">MashupHost</p>
+          <p className="text-sm font-semibold text-blue-700">Suntech Billing</p>
           <h2 className="mt-3 max-w-md text-3xl font-semibold tracking-[-0.025em] text-slate-950">
             Your subscribers, payments and routers in one console.
           </h2>

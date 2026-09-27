@@ -14,9 +14,7 @@ export function whatsappLink(message: string): string {
   return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
 }
 
-/** The square "M" mark. Drawn as SVG rather than using /logo.jpg: that file is a glowing neon
- *  render on a black background that cannot sit on a white header, and it still carries the old
- *  product name. */
+/** The Suntech square "S" mark. */
 export function LogoMark({ size = 32, className = "" }: { size?: number; className?: string }) {
   return (
     <svg
@@ -29,13 +27,13 @@ export function LogoMark({ size = 32, className = "" }: { size?: number; classNa
     >
       <rect width="32" height="32" rx="7" fill="#1d4ed8" />
       <path
-        d="M8.5 22.5V10.2c0-.5.6-.8 1-.4l6.5 6.9 6.5-6.9c.4-.4 1-.1 1 .4v12.3"
+        d="M21 11.5c-.8-1.1-2.2-1.8-3.9-1.8-2.9 0-4.9 1.7-4.9 4.1 0 4.7 8.8 2.7 8.8 7.1 0 2.6-2.1 4.3-5.1 4.3-2.1 0-3.8-.8-4.9-2.2"
         stroke="#fff"
-        strokeWidth="2.4"
+        strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="16" cy="22.5" r="1.9" fill="#34d399" />
+      <circle cx="21" cy="22" r="1.8" fill="#34d399" />
     </svg>
   );
 }
@@ -47,7 +45,7 @@ export function Logo({ inverted = false, className = "" }: { inverted?: boolean;
       <span
         className={`text-[1.2rem] font-semibold tracking-[-0.02em] ${inverted ? "text-white" : "text-slate-950"}`}
       >
-        Mashup<span className={inverted ? "text-blue-400" : "text-blue-700"}>Host</span>
+        Suntech<span className={inverted ? "text-blue-400" : "text-blue-700"}> Billing</span>
       </span>
     </span>
   );

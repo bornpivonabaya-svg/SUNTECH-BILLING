@@ -40,7 +40,7 @@ export async function sendEmail(params: SendEmailParams): Promise<{ delivered: b
   // 1. Resend API Priority
   if (env.RESEND_API_KEY) {
     try {
-      const from = env.RESEND_FROM || env.SMTP_FROM || "MASHUPKGRID ISP <onboarding@resend.dev>";
+      const from = env.RESEND_FROM || env.SMTP_FROM || "Suntech Billing <onboarding@resend.dev>";
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {

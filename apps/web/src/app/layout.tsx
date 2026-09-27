@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   title: {
     // Pages set their own title; this frames it. A single shared title across every page is why
     // search results for a whole site can look like duplicates of one another.
-    default: "MashupHost — Wi-Fi billing system for ISPs in Kenya",
+    default: "Suntech Billing — Wi-Fi & ISP Billing System in Kenya",
     template: `%s · ${SITE_NAME}`,
   },
   description:
@@ -51,14 +51,14 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     url: SITE_URL,
     locale: "en_KE",
-    title: "MashupHost — Wi-Fi billing system for ISPs in Kenya",
+    title: "Suntech Billing — Wi-Fi & ISP Billing System in Kenya",
     description:
       "Sell hotspot vouchers, collect M-Pesa payments automatically and manage MikroTik routers from one dashboard.",
     images: [{ url: "/logo.jpg", width: 1200, height: 630, alt: SITE_NAME }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "MashupHost — Wi-Fi billing system for ISPs in Kenya",
+    title: "Suntech Billing — Wi-Fi & ISP Billing System in Kenya",
     description:
       "Sell hotspot vouchers, collect M-Pesa payments automatically and manage MikroTik routers from one dashboard.",
     images: ["/logo.jpg"],

@@ -104,7 +104,7 @@ function FeatureGroupCard({ group }: { group: LandingSections["featureGroups"][n
 /** Remote WinBox through the platform, and the two VLANs behind a router. */
 function NetworkDiagram() {
   return (
-    <svg viewBox="0 0 520 300" role="img" aria-label="You connect WinBox to MashupHost, which reaches the router through its tunnel; behind the router a switch carries a hotspot VLAN and a PPPoE VLAN." className="h-auto w-full">
+    <svg viewBox="0 0 520 300" role="img" aria-label="You connect WinBox to Suntech Billing, which reaches the router through its tunnel; behind the router a switch carries a hotspot VLAN and a PPPoE VLAN." className="h-auto w-full">
       <g fontFamily="inherit" fontSize="12">
         <rect x="10" y="20" width="130" height="54" rx="8" fill="#1e293b" stroke="#475569" />
         <text x="75" y="44" textAnchor="middle" fill="#f8fafc" fontWeight="600">You, in WinBox</text>
@@ -112,7 +112,7 @@ function NetworkDiagram() {
 
         <line x1="140" y1="47" x2="200" y2="47" stroke="#94a3b8" strokeWidth="2" />
         <rect x="200" y="20" width="130" height="54" rx="8" fill="#1d4ed8" />
-        <text x="265" y="44" textAnchor="middle" fill="#fff" fontWeight="600">MashupHost</text>
+        <text x="265" y="44" textAnchor="middle" fill="#fff" fontWeight="600">Suntech Billing</text>
         <text x="265" y="61" textAnchor="middle" fill="#bfdbfe" fontSize="10">relay + billing</text>
 
         <path d="M330 47 H400 V110" fill="none" stroke="#34d399" strokeWidth="3" strokeDasharray="6 5" />
@@ -213,7 +213,7 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
     Math.min(...plans.map((p) => (p.monthly > 0 ? (1 - p.yearly / p.monthly) * 100 : 0)))
   );
 
-  const salesLink = whatsappLink("Hello MashupHost, I'd like to talk to sales about the ISP platform.");
+  const salesLink = whatsappLink("Hello Suntech Billing, I'd like to talk to sales about the ISP platform.");
 
   return (
     <div className="force-light min-h-screen bg-white text-slate-900 antialiased selection:bg-blue-100 selection:text-blue-950">
@@ -337,7 +337,7 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
                 id="product-title"
                 eyebrow="The platform"
                 title="A Complete ISP Management Solution"
-                body="From subscriber management to payments and reporting, MashupHost gives you full control of your ISP business."
+                body="From subscriber management to payments and reporting, Suntech Billing gives you full control of your ISP business."
               />
               <ul className="mt-8 space-y-3.5">
                 {sections.showcasePoints.map((point) => (
@@ -529,7 +529,7 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
               id="about-title"
               eyebrow="Built for ISP operators"
               title="Made for the way Kenyan ISPs actually work"
-              body="MashupHost is built around M-Pesa, MikroTik and the day-to-day of running a network in Kenya — not adapted from software made for somewhere else."
+              body="Suntech Billing is built around M-Pesa, MikroTik and the day-to-day of running a network in Kenya — not adapted from software made for somewhere else."
             />
             <ul className="mt-10 grid gap-x-10 gap-y-6 sm:mt-14 sm:grid-cols-2 sm:gap-y-10 lg:grid-cols-3">
               {sections.operatorPoints.map(({ title, body, icon }) => {
@@ -633,7 +633,7 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
                 </p>
                 <div className="mt-5 space-y-3 text-sm">
                   <a
-                    href={whatsappLink("Hello MashupHost Support")}
+                    href={whatsappLink("Hello Suntech Billing Support")}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-3 text-slate-200 hover:text-white"
@@ -659,10 +659,10 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
       {/* Floating WhatsApp — kept from the previous homepage; it is the business's main support
           channel. Small and quiet so it never covers content on a phone. */}
       <a
-        href={whatsappLink("Hello MashupHost, I have a question about the ISP platform.")}
+        href={whatsappLink("Hello Suntech Billing, I have a question about the ISP platform.")}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={`Chat with MashupHost on WhatsApp (${SUPPORT_PHONE_DISPLAY})`}
+        aria-label={`Chat with Suntech Billing on WhatsApp (${SUPPORT_PHONE_DISPLAY})`}
         className="fixed bottom-5 right-5 z-40 grid h-12 w-12 place-items-center rounded-full bg-[#25D366] text-white shadow-[0_6px_20px_-6px_rgba(15,23,42,0.45)] transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
       >
         <IconWhatsApp size={24} />

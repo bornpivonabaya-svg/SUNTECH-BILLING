@@ -8,9 +8,9 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Terms of Service",
   description:
-    "The terms governing use of MashupHost's ISP billing, hotspot and network management platform.",
+    "The terms governing use of Suntech Billing's ISP billing, hotspot and network management platform.",
   alternates: { canonical: "/terms" },
-  openGraph: { title: "Terms of Service", description: "The terms governing use of MashupHost's ISP billing, hotspot and network management platform.", url: "/terms" },
+  openGraph: { title: "Terms of Service", description: "The terms governing use of Suntech Billing's ISP billing, hotspot and network management platform.", url: "/terms" },
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {

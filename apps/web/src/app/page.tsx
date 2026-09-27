@@ -69,7 +69,7 @@ export const metadata: Metadata = {
   // Keyword phrase first, brand last: search results truncate from the right, so the words a
   // buyer searched stay visible while the name still appears. A parent layout's title template
   // does not apply to its own segment, so the brand has to be written in here.
-  title: "Wi-Fi Billing System for ISPs in Kenya · MashupHost",
+  title: "Wi-Fi Billing System for ISPs in Kenya · Suntech Billing",
   description:
     "Wi-Fi billing system built for Kenyan ISPs and hotspot operators. Sell time and data vouchers, take M-Pesa payments that activate service automatically, and manage MikroTik routers, RADIUS and customers from one dashboard.",
   alternates: { canonical: "/" },

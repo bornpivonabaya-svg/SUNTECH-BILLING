@@ -37,11 +37,11 @@ export function LandingMaintenanceScreen({ config, onBypass }: Props) {
       <header className="relative z-10 mx-auto w-full max-w-6xl px-6 py-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl overflow-hidden shadow-lg shadow-amber-500/20 ring-1 ring-amber-500/40 bg-slate-950 flex items-center justify-center">
-            <img src="/logo.jpg" alt="MashupHost Logo" className="h-full w-full object-cover" />
+            <img src="/logo.jpg" alt="Suntech Billing Logo" className="h-full w-full object-cover" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-base font-extrabold tracking-tight text-white">MASHUPHOST</span>
+              <span className="text-base font-extrabold tracking-tight text-white">SUNTECH BILLING</span>
               <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-400 uppercase tracking-wider">
                 Maintenance
               </span>
@@ -151,7 +151,7 @@ export function LandingMaintenanceScreen({ config, onBypass }: Props) {
       {/* Footer */}
       <footer className="relative z-10 mx-auto w-full max-w-6xl px-6 py-6 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 font-mono gap-3">
         <div>
-          &copy; {new Date().getFullYear()} MashupHost Technologies. All core network interfaces monitored 24/7.
+          &copy; {new Date().getFullYear()} Suntech Billing Technologies. All core network interfaces monitored 24/7.
         </div>
         <div className="flex items-center gap-4">
           <Link href="/terms" className="hover:text-slate-400 transition-colors">Terms</Link>

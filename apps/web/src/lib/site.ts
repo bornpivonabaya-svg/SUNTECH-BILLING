@@ -11,9 +11,9 @@ const BASE_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_BASE_DOMAIN?.trim();
 
 export const SITE_URL = BASE_DOMAIN
   ? `https://${BASE_DOMAIN.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`
-  : "https://mashuphost.tech";
+  : "https://isp.suntechke.com";
 
-export const SITE_NAME = "MashupHost";
+export const SITE_NAME = "Suntech Billing";
 
 /** Public, indexable routes. Everything else — the dashboard, the captive portal, the customer
  *  app and every auth screen — is deliberately excluded; see robots.ts for why. */

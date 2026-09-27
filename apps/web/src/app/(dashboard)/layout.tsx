@@ -157,9 +157,9 @@ function DashboardShell({ children }: { children: ReactNode }) {
         >
           {/* Brand Header */}
           <div className="flex h-14 items-center gap-3 border-b border-obsidian-800 px-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-semibold text-white">M</div>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-semibold text-white">S</div>
             <div className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-white">MashupHost</span>
+              <span className="block truncate text-sm font-semibold text-white">Suntech Billing</span>
               <span className="block truncate text-xs text-slate-500">{user.tenantId ? user.tenantSlug ?? t.operator : t.platformAdmin}</span>
             </div>
             {/* Explicit Close Button for Mobile Drawer */}
@@ -255,7 +255,7 @@ function DashboardShell({ children }: { children: ReactNode }) {
                   </>
                 )}
                 <span className="truncate font-medium text-slate-200" aria-current="page">
-                  {current?.item.label ?? "MashupHost"}
+                  {current?.item.label ?? "Suntech Billing"}
                 </span>
               </nav>
             </div>
