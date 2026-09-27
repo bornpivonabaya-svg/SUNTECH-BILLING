@@ -1075,4 +1075,5 @@ export const SW: Record<string, string> = {
   "Storage": "Hifadhi",
   "Memory": "Kumbukumbu",
   "reported": "imeripoti",
+  "No health readings yet. Run the router's setup command once more to turn on CPU, memory, temperature and uptime reports.": "Bado hakuna vipimo vya afya. Endesha amri ya kusanidi ruta mara moja zaidi ili kuwasha ripoti za CPU, kumbukumbu, joto na muda wa kuwaka.",
 };

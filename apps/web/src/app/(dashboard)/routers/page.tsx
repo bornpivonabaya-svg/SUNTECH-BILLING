@@ -148,7 +148,14 @@ function HealthStrip({ router }: { router: RouterRow }) {
   if (router.diskFreeBytes != null && router.diskTotalBytes) chips.push({ label: tr("Storage free"), value: `${mb(router.diskFreeBytes)} / ${mb(router.diskTotalBytes)}`, warn: (diskPct ?? 100) < 10 });
   if (router.activeUsers != null) chips.push({ label: tr("Users online"), value: String(router.activeUsers) });
   if (router.uptimeSeconds != null) chips.push({ label: tr("Up for"), value: formatUptime(router.uptimeSeconds)!.replace(/^up /, "") });
-  if (chips.length === 0) return null;
+  if (chips.length === 0) {
+    // Online but no figures: the router checks in with the older script, which sends none.
+    return router.status === "ONLINE" ? (
+      <p className="mt-2 text-xs text-slate-400">
+        {tr("No health readings yet. Run the router's setup command once more to turn on CPU, memory, temperature and uptime reports.")}
+      </p>
+    ) : null;
+  }
   return (
     <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={tr("Router health")}>
       {chips.map((c) => (
