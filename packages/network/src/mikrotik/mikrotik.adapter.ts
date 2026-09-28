@@ -603,7 +603,7 @@ export class MikroTikAdapter implements NetworkDeviceAdapter {
         const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
         if (isIp) {
           if (!ipEntries.some((e) => e["dst-address"] === host)) {
-            assertNoTrap(await client.talk(["/ip/hotspot/walled-garden/ip/add", `=dst-address=${host}`, "=action=accept", "=comment=MASHUPKGRID"]), "walled-garden ip add");
+            assertNoTrap(await client.talk(["/ip/hotspot/walled-garden/ip/add", `=dst-address=${host}`, "=protocol=tcp", "=dst-port=80,443", "=action=accept", "=comment=MASHUPKGRID"]), "walled-garden ip add");
             changes.push(`allowed ${host} before login`);
           }
           continue;
@@ -613,7 +613,15 @@ export class MikroTikAdapter implements NetworkDeviceAdapter {
           changes.push(`allowed ${host} before login`);
         }
         if (!host.includes("*") && !ipEntries.some((e) => e["dst-host"] === host)) {
-          assertNoTrap(await client.talk(["/ip/hotspot/walled-garden/ip/add", `=dst-host=${host}`, "=action=accept", "=comment=MASHUPKGRID"]), "walled-garden ip add");
+          assertNoTrap(await client.talk(["/ip/hotspot/walled-garden/ip/add", `=dst-host=${host}`, "=protocol=tcp", "=dst-port=80,443", "=action=accept", "=comment=MASHUPKGRID"]), "walled-garden ip add");
+        }
+      }
+      // Entries from before WEB_ONLY opened those servers on every port and protocol, which VPN
+      // apps used to get online without paying: narrow them to web pages.
+      for (const e of ipEntries) {
+        if (e["comment"] === "MASHUPKGRID" && !e["dst-port"] && e[".id"]) {
+          assertNoTrap(await client.talk(["/ip/hotspot/walled-garden/ip/set", `=.id=${e[".id"]}`, "=protocol=tcp", "=dst-port=80,443"]), "walled-garden ip set");
+          changes.push(`limited ${e["dst-host"] || e["dst-address"]} to web pages before login`);
         }
       }
     }

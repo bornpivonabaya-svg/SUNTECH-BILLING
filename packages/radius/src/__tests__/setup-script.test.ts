@@ -5,6 +5,7 @@ import {
   buildMikrotikWinboxScript,
   buildHeartbeatScript,
   ALOGIN_PAGE_MARKER,
+  UNPAID_DNS_RULES,
   deferred,
   managementSources,
   plainCommands,
@@ -205,6 +206,19 @@ describe("router setup script — RouterOS version chosen when adding the router
     expect(script.indexOf('remove [find comment="MASHUPKGRID LAN NAT"]')).toBeLessThan(script.indexOf("out-interface=!bridge"));
   });
 
+  it("lets unpaid devices open only web pages on walled-garden addresses, and stops DNS tunnels", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, base);
+    const ipEntries = script.split("\n").filter((l) => l.includes("/ip hotspot walled-garden ip add"));
+    expect(ipEntries.length).toBeGreaterThan(0);
+    for (const line of ipEntries) expect(line).toContain("protocol=tcp dst-port=80,443");
+    // Unpaid devices only (hotspot=!auth), in the chain the hotspot keeps for such rules.
+    expect(script).toContain("chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 packet-size=220-65535 action=drop");
+    expect(script).toContain("dst-limit=20,100,src-address/1m action=accept");
+    expect(script.indexOf('remove [find comment="MASHUPKGRID UNPAID DNS"]')).toBeLessThan(script.indexOf("chain=pre-hs-input"));
+    // The limited accept comes before the catch-all drop.
+    expect(script.indexOf("dst-limit=20,100")).toBeLessThan(script.indexOf("dst-port=53,64872 action=drop"));
+  });
+
   it("not chosen: detects on the router and carries both variants", () => {
     const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, base);
     expect(script).toContain("# RouterOS version: detected on the router");
@@ -321,6 +335,16 @@ describe("router health report", () => {
     expect(report).toContain(
       ':do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID LAN NAT"]] = 0) do={/ip firewall nat add chain=srcnat src-address=192.168.88.0/24 out-interface=!bridge action=masquerade comment="MASHUPKGRID LAN NAT"}} on-error={}'
     );
+  });
+
+  it("brings routers set up earlier to the same unpaid-device limits", () => {
+    const report = buildHeartbeatScript(callbackUrl);
+    expect(report).toContain(
+      ':if ([:len [/ip hotspot walled-garden ip get $w dst-port]] = 0) do={/ip hotspot walled-garden ip set $w protocol=tcp dst-port=80,443}'
+    );
+    expect(report).toContain(`[:len [/ip firewall filter find comment="MASHUPKGRID UNPAID DNS"]] != ${UNPAID_DNS_RULES.length}`);
+    // RouterOS 6 gets them from its setup script: its report must stay under 4 KB.
+    expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })).not.toContain("UNPAID DNS");
   });
 
   it("keeps the RouterOS 6 report under the 4 KB its fetch returns", () => {
