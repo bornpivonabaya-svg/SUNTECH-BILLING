@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAloginPage } from "../../lib/router-pages.js";
+import { buildAloginPage, buildLoginPage, portalPageSizes } from "../../lib/router-pages.js";
 
 describe("the router's 'you're online' page", () => {
   const html = buildAloginPage(`Mash <Wi-Fi> & $(username) "Co"`);
@@ -39,5 +39,21 @@ describe("the router's 'you're online' page", () => {
   it("escapes the ISP's name and can't be used to inject a router variable", () => {
     expect(html).toContain('<p class="brand">Mash &lt;Wi-Fi&gt; &amp; $ (username) &quot;Co&quot;</p>');
     expect(html).not.toContain("$(username)");
+  });
+});
+
+describe("the router's sign-in page", () => {
+  it("carries the marker and sends the phone to this ISP's portal with its hotspot details", () => {
+    const html = buildLoginPage("https://captive.example.com", "demo-isp");
+    expect(html).toContain("mkg-portal");
+    expect(html).toContain("https://captive.example.com/hotspot/demo-isp?mac=$(mac)");
+  });
+
+  it("gives the router the exact byte sizes it compares its copies with", () => {
+    const sizes = portalPageSizes("demo-isp", "Démo Wi-Fi");
+    expect(sizes.alogin).toBe(Buffer.byteLength(buildAloginPage("Démo Wi-Fi"), "utf8"));
+    expect(sizes.login).toBeGreaterThan(200);
+    // A different ISP's name changes the "you're online" page, so its size is its own.
+    expect(portalPageSizes("demo-isp", "A much longer ISP name").alogin).not.toBe(sizes.alogin);
   });
 });

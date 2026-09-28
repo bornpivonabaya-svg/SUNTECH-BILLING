@@ -119,7 +119,14 @@ describe("router setup script — one rejected command can't stop the rest", () 
     expect(at("/interface wireless set wlan1")).toBeGreaterThan(at("mkg-heartbeat"));
   });
 
-  it("installs the light per-app filter on every router, after everything essential", () => {
+  it("leaves the per-app filter out for an ISP that sells no per-app packages", () => {
+    const light = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { appFilter: false });
+    expect(light).not.toContain('comment="MASHUPKGRID APP FILTER"');
+    expect(light).toContain("# Not installed: this ISP sells no per-app packages.");
+    expect(light).toContain("mkg-heartbeat");
+  });
+
+  it("installs the light per-app filter by default, after everything essential", () => {
     const at = (needle: string) => script.indexOf(needle);
     const filter = at('comment="MASHUPKGRID APP FILTER"');
     expect(filter).toBeGreaterThan(0);
@@ -298,7 +305,11 @@ describe("router setup script — the 'you're online' page", () => {
   it("downloads alogin.html next to login.html and repairs both", () => {
     const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { loginTemplateUrl: "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template" });
     expect(script).toContain('url="https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-alogin-template" dst-path=hotspot/alogin.html');
-    expect(script).toMatch(/mkg-portal-page.*hotspot\/login\.html.*hotspot\/alogin\.html/);
+    // The report repairs both (portalRepair); the separate scheduler is removed, for small routers.
+    expect(script).toContain(":do {/system scheduler remove [find name=mkg-portal-page]} on-error={}");
+    expect(script).not.toContain("scheduler add name=mkg-portal-page");
+    // A re-run never swaps the ISP's page for MikroTik's stock one.
+    expect(plainCommands(script)).toContain(':do {:if ([:len [/file find name="hotspot/login.html"]] = 0) do={/ip hotspot reset-html}} on-error={}');
   });
 });
 
@@ -431,19 +442,26 @@ describe("router health report", () => {
   it("repairs the sign-in page in the folder the hotspot really serves from", () => {
     const login = "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template";
     const report = buildHeartbeatScript(callbackUrl, login);
-    // Reads each profile's own html-directory, and treats missing or under-200-byte as broken.
+    // Reads each profile's own html-directory; without known sizes, missing or under 200 bytes is broken.
     expect(report).toContain(":local dir [/ip hotspot profile get $p html-directory]");
     expect(report).toContain(':local f [/file find name=($dir . "/login.html")]');
-    expect(report).toContain("[/file get ($f->0) size] >= 200");
-    // MikroTik's stock page (after a reset-html) is replaced too: ours carries a marker.
-    expect(report).toContain('[:find [/file get ($f->0) contents] "mkg-portal"]');
-    // Rebuilds that exact hotspot's pages through :parse, then downloads into the same folder.
-    expect(report).toContain(':local r [:parse ("/ip hotspot reset-html " . $h)]');
+    expect(report).toContain("[:tonum [/file get ($f->0) size]] >= 200");
+    // Never reads the file's contents (unreliable on RouterOS 7, slow on a hAP lite).
+    expect(report).not.toContain("contents");
+    // Downloads over the page in the same folder, never restoring MikroTik's stock page first:
+    // reset-html only when the folder itself is missing.
+    expect(report).toContain(':if ([:len [/file find name=$dir]] = 0) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}}');
     expect(report).toContain(`/tool fetch url="${login}" dst-path=($dir . "/login.html")`);
     expect(report).toContain('dst-path=($dir . "/alogin.html")');
-    // No more guessing fixed folders.
     expect(report).not.toContain('dst-path=flash/hotspot/login.html');
-    expect(report.indexOf("reset-html")).toBeLessThan(report.indexOf(`url="${login}"`));
+  });
+
+  it("spots a stock or outdated page by the exact size the platform serves", () => {
+    const login = "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template";
+    const report = buildHeartbeatScript(callbackUrl, login, { pageSizes: { login: 1234, alogin: 5678 } });
+    expect(report).toContain(":if ([:len $f] > 0) do={:if ([:tonum [/file get ($f->0) size]] = 1234) do={:set ok true}}");
+    expect(report).toContain(":if ([:len $a] > 0) do={:if ([:tonum [/file get ($a->0) size]] = 5678) do={:set aok true}}");
+    expect(report).not.toContain(">= 200");
   });
 
   it("shares the internet with every customer whichever port it arrives on, on routers set up earlier too", () => {
@@ -499,7 +517,7 @@ describe("router health report", () => {
     const login = "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template";
     const report = buildHeartbeatScript(callbackUrl, login);
     expect(report).toContain(':local a [/file find name=($dir . "/alogin.html")]');
-    expect(report).toContain(`[:find [/file get ($a->0) contents] "${ALOGIN_PAGE_MARKER}"]`);
+    expect(report).toContain("[:tonum [/file get ($a->0) size]] >= 200");
     expect(report).toContain(
       ':if ($aok = false) do={:do {/tool fetch url="https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-alogin-template" dst-path=($dir . "/alogin.html")'
     );
