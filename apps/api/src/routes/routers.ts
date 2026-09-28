@@ -39,6 +39,9 @@ import {
   platformPublicAddress,
   listWalledGardenHostsFor,
   reconcileRouterProvisioning,
+  heartbeatOnlineWindowMs,
+  heartbeatLateWindowMs,
+  heartbeatIntervalRouterOs,
 } from "@mashupkgrid/network";
 import {
   buildMikrotikProvisioningScript,
@@ -49,6 +52,7 @@ import {
   buildSocialFirewallOnlyScript,
   hotspotWalledGardenHosts,
   type CardGateway,
+  type VpnPeerSettings,
 } from "@mashupkgrid/radius";
 import { successResponse, ConflictError, NotFoundError } from "@mashupkgrid/shared";
 import { env, isProduction } from "@mashupkgrid/config";
@@ -59,6 +63,7 @@ import { requirePermission } from "../plugins/authorize.js";
 import { requireFeature } from "../plugins/require-feature.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { assertWithinPlanLimit } from "../lib/plan-limits.js";
+import { winboxRelayHost } from "../lib/winbox-relay-host.js";
 
 const preHandler = [authenticate, resolveTenant, checkMaintenance] as const;
 
@@ -177,6 +182,32 @@ async function tenantWalledGarden(tenantId: string): Promise<string[]> {
   });
 }
 
+/** The platform's end of the management VPN: its public key (from the environment, else from
+ *  wg0 itself) and the host routers dial. */
+async function wireguardServer(): Promise<{ serverPublicKey: string; serverHost: string; serverPort: number }> {
+  let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
+  if (!serverPublicKey) {
+    try {
+      const { execFileSync } = await import("node:child_process");
+      serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], { encoding: "utf-8" }).trim();
+    } catch {
+      serverPublicKey = "";
+    }
+  }
+  const serverHost = env.WIREGUARD_SERVER_ENDPOINT
+    ? env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0]! : env.WIREGUARD_SERVER_ENDPOINT
+    : await platformPublicAddress();
+  return { serverPublicKey, serverHost, serverPort: env.WIREGUARD_LISTEN_PORT || 51820 };
+}
+
+/** What a router needs to rebuild its end of the VPN, when the VPN is on and it has an address. */
+async function routerVpnSettings(router: RouterRow): Promise<VpnPeerSettings | null> {
+  if (!env.ENABLE_WIREGUARD_REMOTE_ACCESS || !router.vpnIp) return null;
+  const { serverPublicKey, serverHost, serverPort } = await wireguardServer();
+  if (!serverPublicKey || !serverHost) return null;
+  return { serverPublicKey, endpointHost: serverHost, endpointPort: serverPort, subnet: env.WIREGUARD_SUBNET_CIDR, vpnIp: router.vpnIp };
+}
+
 /** The address routers use to reach this API: ROUTER_API_BASE_URL when set (e.g. a LAN address
  *  for testing a router next to a dev machine), otherwise the public API URL. */
 function routerApiBase(): string {
@@ -209,7 +240,8 @@ function requireTenant(tenantId: string | null): string {
  *  many orders of magnitude under Number.MAX_SAFE_INTEGER measured in bytes. */
 function computeLiveRouterStatus(
   status: "UNKNOWN" | "ONLINE" | "WARNING" | "DOWN",
-  lastSeenAt: Date | string | null
+  lastSeenAt: Date | string | null,
+  size: { memoryTotalBytes?: bigint | number | null; boardName?: string | null } = {}
 ): "UNKNOWN" | "ONLINE" | "WARNING" | "DOWN" {
   if (status === "UNKNOWN" || !lastSeenAt) {
     return "UNKNOWN";
@@ -218,22 +250,22 @@ function computeLiveRouterStatus(
   if (isNaN(lastSeenMs)) return status;
 
   const elapsedMs = Date.now() - lastSeenMs;
-  // Heartbeat is scheduled every 60s (1 minute).
-  // 1. Within 2.5 minutes (150s) = Healthy ONLINE.
-  if (elapsedMs <= 150_000) {
+  // The router checks in every minute, or every 5 on a small router (heartbeat-interval.ts).
+  // 1. Within 2.5 intervals = healthy ONLINE.
+  if (elapsedMs <= heartbeatOnlineWindowMs(size)) {
     return "ONLINE";
   }
-  // 2. Between 2.5m and 4m (240s) = WARNING (delayed / lagging heartbeat).
-  if (elapsedMs <= 240_000) {
+  // 2. Up to 4 intervals = WARNING (delayed / lagging heartbeat).
+  if (elapsedMs <= heartbeatLateWindowMs(size)) {
     return "WARNING";
   }
-  // 3. Over 4 minutes without a single heartbeat = The router is OFF / DOWN.
+  // 3. Longer without a single heartbeat = the router is OFF / DOWN.
   return "DOWN";
 }
 
 function toRouterSummary(router: RouterRow) {
   const { usernameEncrypted: _u, passwordEncrypted: _p, provisionTokenHash: _t, previousProvisionTokenHash: _pt, vpnRegisterTokenHash: _vt, ...summary } = router;
-  const effectiveStatus = computeLiveRouterStatus(summary.status, summary.lastSeenAt);
+  const effectiveStatus = computeLiveRouterStatus(summary.status, summary.lastSeenAt, summary);
 
   // Auto-sync database row if a router has silently died / been powered off
   if (summary.status === "ONLINE" && effectiveStatus !== "ONLINE") {
@@ -397,21 +429,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
       const managementSource = env.ROUTER_MANAGEMENT_SOURCE || (await platformPublicAddress());
       const vpnIp = await ensureRouterVpnIp(router.id);
 
-      let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
-      if (!serverPublicKey) {
-        try {
-          const { execFileSync } = await import("node:child_process");
-          serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], {
-            encoding: "utf-8",
-          }).trim();
-        } catch {
-          serverPublicKey = "";
-        }
-      }
-
-      const serverHost = env.WIREGUARD_SERVER_ENDPOINT
-        ? (env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0] : env.WIREGUARD_SERVER_ENDPOINT)
-        : await platformPublicAddress();
+      const { serverPublicKey, serverHost } = await wireguardServer();
 
       const credentials = await getGeneratedCredentials(tenantId, routerId);
       const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}/callback`;
@@ -675,7 +693,12 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         useTls: router.useTls,
       });
       const cloudHost = await platformPublicAddress();
-      const relayHost = env.WINBOX_RELAY_PUBLIC_HOST || (env.WIREGUARD_SERVER_ENDPOINT || cloudHost).split(":")[0] || null;
+      const relayHost =
+        (await winboxRelayHost({
+          override: env.WINBOX_RELAY_PUBLIC_HOST,
+          apiUrl: env.APP_API_PUBLIC_URL,
+          fallback: (env.WIREGUARD_SERVER_ENDPOINT || cloudHost).split(":")[0] || cloudHost,
+        })) || null;
       reply.send(
         successResponse(
           {
@@ -1067,6 +1090,9 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       buildHeartbeatScript(callbackUrl, loginTemplateUrl, {
         hotspotCheck: !isV6,
         walledGarden: isV6 ? [] : await tenantWalledGarden(router.tenantId),
+        // Every 5 minutes on a small router (hAP lite and the like), every minute otherwise.
+        checkInEvery: heartbeatIntervalRouterOs(router),
+        vpn: isV6 ? null : await routerVpnSettings(router),
       })
     );
   });

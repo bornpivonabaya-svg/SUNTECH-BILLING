@@ -19,6 +19,7 @@ import { APP_FILTER_RULE_COUNT, APP_FILTER_TAG } from "./app-filter.js";
 import { rememberActiveDevices } from "./hotspot-device.service.js";
 import { listWalledGardenHostsFor } from "./walled-garden.js";
 import { withRadiusTrend, type HotspotCheck, type RouterHeartbeatMetrics } from "./heartbeat-report.js";
+import { heartbeatOnlineWindowMs } from "./heartbeat-interval.js";
 
 export type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
 
@@ -331,7 +332,14 @@ export async function completeRouterProvisioning(
   const router = await findRouterByProvisionToken(provisionToken);
   if (!router) throw new NotFoundError("Provisioning token");
 
-  const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : "";
+  // The key the setup script sends once, or the one the router's report carries when it differs
+  // from what is registered (sending it once failed, or the router's key changed).
+  const reportedKey = metrics?.wgPublicKey && metrics.wgPublicKey !== router.vpnPublicKey ? metrics.wgPublicKey : "";
+  const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : reportedKey;
+  if (metrics?.wgPublicKey) {
+    const { wgPublicKey: _key, ...figures } = metrics;
+    metrics = figures;
+  }
 
   const updateData: Record<string, unknown> = {
     // The router checked in with its new token: the old one has done its job.
@@ -588,11 +596,13 @@ export async function deleteRouter(tenantId: string, routerId: string): Promise<
   ]);
 }
 
-/** How long after its last heartbeat a router is still considered alive when the platform
- *  cannot open a management connection to it. buildMikrotikProvisioningScript schedules that
- *  heartbeat every 60s (1m), so 2.5 minutes represents 2 missed heartbeats: responsive enough
- *  that staff immediately see when a router is powered off, yet tolerant of a momentary dropped packet. */
-const HEARTBEAT_LIVENESS_WINDOW_MS = 2.5 * 60 * 1000;
+/** Whether a router's last heartbeat is recent enough to count it alive when the platform cannot
+ *  open a management connection to it: 2.5 check-in intervals, i.e. 2 missed heartbeats (every
+ *  minute, or every 5 on a small router — see heartbeat-interval.ts). Responsive enough that staff
+ *  see a powered-off router quickly, tolerant of a momentary dropped packet. */
+function heardFromRecently(router: Router): boolean {
+  return Boolean(router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < heartbeatOnlineWindowMs(router));
+}
 
 /** Opens a real connection to the router, runs a health check, and persists the result onto
  *  the Router row (status/lastSeenAt/lastError/resource usage) so the routers list reflects
@@ -759,7 +769,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
           health = vpnHealth;
           await prisma.router.update({ where: { id: router.id }, data: { host: router.vpnIp } });
           router.host = router.vpnIp;
-        } else if (router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < HEARTBEAT_LIVENESS_WINDOW_MS) {
+        } else if (heardFromRecently(router)) {
           inferredFromHeartbeat = true;
           health = {
             reachable: true,
@@ -773,7 +783,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
           health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
         }
       } catch {
-        if (router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < HEARTBEAT_LIVENESS_WINDOW_MS) {
+        if (heardFromRecently(router)) {
           inferredFromHeartbeat = true;
           health = {
             reachable: true,
@@ -787,7 +797,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
           health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
         }
       }
-    } else if (router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < HEARTBEAT_LIVENESS_WINDOW_MS) {
+    } else if (heardFromRecently(router)) {
       inferredFromHeartbeat = true;
       health = {
         reachable: true,
