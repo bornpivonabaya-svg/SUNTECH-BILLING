@@ -47,6 +47,8 @@ import {
   buildMikrotikVpnCompleteScript,
   buildMikrotikWinboxScript,
   buildSocialFirewallOnlyScript,
+  hotspotWalledGardenHosts,
+  type CardGateway,
 } from "@mashupkgrid/radius";
 import { successResponse, ConflictError, NotFoundError } from "@mashupkgrid/shared";
 import { env, isProduction } from "@mashupkgrid/config";
@@ -139,6 +141,39 @@ async function getTenantPortalDomains(tenantId: string): Promise<string[]> {
     select: { hostname: true },
   });
   return domains.map((d) => d.hostname);
+}
+
+/** The card gateways this ISP takes hotspot payments with (switched on, and not hidden from the
+ *  portal): only these get their checkout hosts in the walled garden. */
+async function tenantCardGateways(tenantId: string): Promise<CardGateway[]> {
+  const [configs, tenant] = await Promise.all([
+    prisma.paymentProviderConfig.findMany({ where: { tenantId, isActive: true }, select: { provider: true } }),
+    prisma.tenant.findUnique({ where: { id: tenantId }, select: { portalPaymentsDisabled: true } }),
+  ]);
+  const disabled = new Set<string>(tenant?.portalPaymentsDisabled ?? []);
+  return (["PAYSTACK", "PESAPAL"] as const).filter(
+    (g) => configs.some((c) => (c.provider as string) === g) && !disabled.has(g)
+  );
+}
+
+function portalHostname(): string {
+  return env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech";
+}
+
+/** What an unpaid device on this ISP's routers may reach; the heartbeat keeps routers to it. */
+async function tenantWalledGarden(tenantId: string): Promise<string[]> {
+  const [portalDomains, cardGateways, extraHosts] = await Promise.all([
+    getTenantPortalDomains(tenantId),
+    tenantCardGateways(tenantId),
+    listWalledGardenHostsFor(tenantId),
+  ]);
+  return hotspotWalledGardenHosts({
+    apiHost: new URL(routerApiBase()).hostname,
+    portalHost: portalHostname(),
+    portalDomains,
+    cardGateways,
+    extraHosts,
+  });
 }
 
 /** The address routers use to reach this API: ROUTER_API_BASE_URL when set (e.g. a LAN address
@@ -401,6 +436,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech",
         portalDomains: await getTenantPortalDomains(tenantId),
         extraWalledGardenHosts: await listWalledGardenHostsFor(tenantId),
+        cardGateways: await tenantCardGateways(tenantId),
         pppoeInterface: router.pppoeInterface,
         pppoeGatewayIp: router.pppoeGatewayIp,
         pppoePoolRange: router.pppoePoolRange,
@@ -985,6 +1021,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech",
       portalDomains: await getTenantPortalDomains(router.tenantId),
       extraWalledGardenHosts: await listWalledGardenHostsFor(router.tenantId),
+      cardGateways: await tenantCardGateways(router.tenantId),
       pppoeInterface: router.pppoeInterface,
       pppoeGatewayIp: router.pppoeGatewayIp,
       pppoePoolRange: router.pppoePoolRange,
@@ -1023,9 +1060,13 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     const loginTemplateUrl = tenantSlug
       ? `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
       : undefined;
+    // RouterOS 6's fetch returns at most 4 KB, too little for the hotspot self-check as well.
+    const isV6 = Boolean(router.routerOsVersion?.startsWith("6"));
     reply.header("Content-Type", "text/plain; charset=utf-8").send(
-      // RouterOS 6's fetch returns at most 4 KB, too little for the hotspot self-check as well.
-      buildHeartbeatScript(callbackUrl, loginTemplateUrl, { hotspotCheck: !router.routerOsVersion?.startsWith("6") })
+      buildHeartbeatScript(callbackUrl, loginTemplateUrl, {
+        hotspotCheck: !isV6,
+        walledGarden: isV6 ? [] : await tenantWalledGarden(router.tenantId),
+      })
     );
   });
 

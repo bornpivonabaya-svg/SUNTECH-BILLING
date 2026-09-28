@@ -6,6 +6,7 @@ import {
   buildHeartbeatScript,
   ALOGIN_PAGE_MARKER,
   UNPAID_DNS_RULES,
+  walledGardenSync,
   deferred,
   managementSources,
   plainCommands,
@@ -92,6 +93,7 @@ describe("router setup script — one rejected command can't stop the rest", () 
     loginTemplateUrl: "http://192.168.1.183:4000/api/v1/hotspot/demo-isp/mikrotik-login-template",
     serverPublicKey: "SERVERPUBLICKEYAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     blockTethering: true,
+    cardGateways: ["PAYSTACK"],
   });
 
   it("has no bare top-level command that could abort /import", () => {
@@ -103,7 +105,7 @@ describe("router setup script — one rejected command can't stop the rest", () 
     const ipWalled = script.split("\n").filter((l) => l.includes("walled-garden ip add"));
     expect(ipWalled.length).toBeGreaterThan(0);
     for (const l of ipWalled) expect(l).not.toContain("*");
-    expect(script).toContain('walled-garden add dst-host=*.safaricom.co.ke action=allow');
+    expect(script).toContain("walled-garden add dst-host=*.paystack.com action=allow");
   });
 
   it("creates the management account before anything that can drop the operator's session", () => {
@@ -217,6 +219,28 @@ describe("router setup script — RouterOS version chosen when adding the router
     expect(script.indexOf('remove [find comment="MASHUPKGRID UNPAID DNS"]')).toBeLessThan(script.indexOf("chain=pre-hs-input"));
     // The limited accept comes before the catch-all drop.
     expect(script.indexOf("dst-limit=20,100")).toBeLessThan(script.indexOf("dst-port=53,64872 action=drop"));
+  });
+
+  it("allows unpaid devices only the exact portal and API names, and card hosts only for card ISPs", () => {
+    const mpesaOnly = buildMikrotikProvisioningScript(router, credentials, callbackUrl, {
+      loginTemplateUrl: "https://api.mashuphost.tech/api/v1/hotspot/demo-isp/mikrotik-login-template",
+      portalHost: "https://captive.mashuphost.tech",
+    });
+    const garden = mpesaOnly.split("\n").filter((l) => l.includes("walled-garden") && l.includes(" add "));
+    const hosts = garden.map((l) => /dst-(?:host|address)=(\S+)/.exec(l)?.[1]);
+    expect(hosts).toContain("captive.mashuphost.tech");
+    expect(hosts).toContain("api.mashuphost.tech");
+    // mashuphost.tech itself is behind Cloudflare, and a wildcard is matched on the name a device
+    // claims to visit: both let tunnel apps through without paying.
+    expect(hosts.some((h) => h?.includes("*"))).toBe(false);
+    expect(hosts).not.toContain("mashuphost.tech");
+    expect(mpesaOnly).not.toContain("safaricom");
+    expect(mpesaOnly).not.toContain("paystack");
+
+    const cards = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { cardGateways: ["PESAPAL"] });
+    expect(cards).toContain("walled-garden add dst-host=*.pesapal.com action=allow");
+    expect(cards).toContain("walled-garden add dst-host=*.visa.com action=allow");
+    expect(cards).not.toContain("paystack");
   });
 
   it("not chosen: detects on the router and carries both variants", () => {
@@ -345,6 +369,24 @@ describe("router health report", () => {
     expect(report).toContain(`[:len [/ip firewall filter find comment="MASHUPKGRID UNPAID DNS"]] != ${UNPAID_DNS_RULES.length}`);
     // RouterOS 6 gets them from its setup script: its report must stay under 4 KB.
     expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })).not.toContain("UNPAID DNS");
+  });
+
+  it("keeps a router's walled garden to exactly this ISP's list", () => {
+    const report = buildHeartbeatScript(callbackUrl, undefined, { walledGarden: ["68.210.187.104", "captive.mashuphost.tech", "*.pesapal.com"] });
+    const sync = walledGardenSync(["68.210.187.104", "captive.mashuphost.tech", "*.pesapal.com"]);
+    expect(report).toContain(sync);
+    // IP addresses stay as dst-address entries, untouched.
+    expect(sync).toContain(':local ok {"captive.mashuphost.tech";"*.pesapal.com"}');
+    // Removes only the platform's own entries that are no longer on the list, in both menus.
+    expect(sync).toContain(':foreach e in=[/ip hotspot walled-garden find comment="MASHUPKGRID"] do={:local h [/ip hotspot walled-garden get $e dst-host]; :if ([:len $h] > 0 && [:typeof [:find $ok $h]] = "nil") do={/ip hotspot walled-garden remove $e}}');
+    expect(sync).toContain("[/ip hotspot walled-garden ip find comment=\"MASHUPKGRID\"]");
+    // Adds what is missing; the IP menu gets names only, never a wildcard, web pages only.
+    expect(sync).toContain('/ip hotspot walled-garden ip add dst-host=$h protocol=tcp dst-port=80,443 action=accept comment="MASHUPKGRID"');
+    expect(sync).toContain(':if ([:typeof [:find $h "*"]] = "nil"');
+    // Nothing to sync: nothing emitted (never an empty list that would remove everything).
+    expect(walledGardenSync([])).toBe("");
+    expect(buildHeartbeatScript(callbackUrl)).not.toContain(":local ok {");
+    expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false, walledGarden: ["captive.mashuphost.tech"] })).not.toContain(":local ok {");
   });
 
   it("keeps the RouterOS 6 report under the 4 KB its fetch returns", () => {
