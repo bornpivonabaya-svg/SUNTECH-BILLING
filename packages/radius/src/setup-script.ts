@@ -38,6 +38,29 @@ export const PAYMENT_GATEWAY_WALLED_GARDEN_HOSTS = [
   "*.modirum.com",
 ] as const;
 
+/** What an unpaid device may do with a walled-garden address: open web pages, nothing else. An
+ *  entry with no protocol opened those servers on every port and protocol, which "free browsing"
+ *  VPN apps (WireGuard, OpenVPN over UDP, Cloudflare WARP…) used to get online without paying. */
+export const WEB_ONLY = "protocol=tcp dst-port=80,443";
+
+/**
+ * Stops DNS tunnels (SlowDNS, dnstt, iodine) for devices that have not paid. Every phone's DNS
+ * goes to the router, which answers any name, so a tunnel app could carry a whole connection
+ * inside lookups for its own domain. For unpaid devices only (hotspot=!auth — paying customers
+ * are never touched): oversized lookups are dropped (a tunnel packs data into long names; a
+ * normal lookup is well under 220 bytes), at most 20 a second per device with a burst of 100
+ * (plenty to open the sign-in and payment pages, far too few to carry a tunnel), and no DNS over
+ * TCP. pre-hs-input is the chain the hotspot keeps for exactly this: it runs before the hotspot's
+ * own rules for every packet a hotspot device sends to the router.
+ */
+export const UNPAID_DNS_COMMENT = "MASHUPKGRID UNPAID DNS";
+export const UNPAID_DNS_RULES = [
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 packet-size=220-65535 action=drop comment="${UNPAID_DNS_COMMENT}"`,
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 dst-limit=20,100,src-address/1m action=accept comment="${UNPAID_DNS_COMMENT}"`,
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 action=drop comment="${UNPAID_DNS_COMMENT}"`,
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=tcp dst-port=53 action=drop comment="${UNPAID_DNS_COMMENT}"`,
+];
+
 /** RouterOS splits the walled garden across two menus and BOTH are needed.
  *  `/ip hotspot walled-garden` is the HTTP-proxy-level menu: it can match a Host header, but only
  *  for plain HTTP. `/ip hotspot walled-garden ip` is the packet-level menu, and it is the only
@@ -63,14 +86,14 @@ function walledGardenLines(hosts: readonly string[]): string {
     // used to skip everything after it — the login page, the heartbeat and the VPN — leaving a
     // router that linked once and then went silent.
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
-      lines.push(`:do {/ip hotspot walled-garden ip add dst-address=${host} action=accept comment="MASHUPKGRID"} on-error={}`);
+      lines.push(`:do {/ip hotspot walled-garden ip add dst-address=${host} ${WEB_ONLY} action=accept comment="MASHUPKGRID"} on-error={}`);
       continue;
     }
     lines.push(`:do {/ip hotspot walled-garden add dst-host=${host} action=allow comment="MASHUPKGRID"} on-error={}`);
     // The IP walled garden resolves dst-host to addresses and does not take wildcards; the HTTP
     // walled garden above already covers "*." names.
     if (!host.includes("*")) {
-      lines.push(`:do {/ip hotspot walled-garden ip add dst-host=${host} action=accept comment="MASHUPKGRID"} on-error={}`);
+      lines.push(`:do {/ip hotspot walled-garden ip add dst-host=${host} ${WEB_ONLY} action=accept comment="MASHUPKGRID"} on-error={}`);
     }
   }
   return lines.join("\n");
@@ -443,6 +466,8 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 :do {/ip hotspot walled-garden remove [find comment="MASHUPKGRID"]} on-error={}
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
+:do {/ip firewall filter remove [find comment="${UNPAID_DNS_COMMENT}"]} on-error={}
+${UNPAID_DNS_RULES.map((rule) => `:do {${rule}} on-error={}`).join("\n")}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
@@ -510,6 +535,10 @@ function heartbeatOnEvent(callbackUrl: string): string {
 export const LAN_NAT_COMMENT = "MASHUPKGRID LAN NAT";
 const LAN_NAT_RULE = `/ip firewall nat add chain=srcnat src-address=192.168.88.0/24 out-interface=!bridge action=masquerade comment="${LAN_NAT_COMMENT}"`;
 
+const UNPAID_REPAIR =
+  `:do {:foreach w in=[/ip hotspot walled-garden ip find comment="MASHUPKGRID"] do={:if ([:len [/ip hotspot walled-garden ip get $w dst-port]] = 0) do={/ip hotspot walled-garden ip set $w ${WEB_ONLY}}}} on-error={}\n` +
+  `:do {:if ([:len [/ip firewall filter find comment="${UNPAID_DNS_COMMENT}"]] != ${UNPAID_DNS_RULES.length}) do={/ip firewall filter remove [find comment="${UNPAID_DNS_COMMENT}"]; ${UNPAID_DNS_RULES.join("; ")}}} on-error={}`;
+
 /**
  * What mkg-heartbeat runs each minute, served fresh by the platform (so it improves without anyone
  * re-running setup). Reads the router's own figures and posts them to the callback as a form
@@ -539,6 +568,10 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     `:do {:if ([:len [/ip firewall nat find comment="${LAN_NAT_COMMENT}"]] = 0) do={${LAN_NAT_RULE}}} on-error={}`,
     `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
     // The sign-in page, in the folder each hotspot really uses (see portalRepair).
+    // Unpaid devices: walled-garden addresses for web pages only, and no DNS tunnels (see WEB_ONLY
+    // and UNPAID_DNS_RULES). Routers set up before these existed get them here; RouterOS 6 gets
+    // them from its setup script, since its report must stay under 4 KB.
+    ...(options.hotspotCheck === false ? [] : [UNPAID_REPAIR]),
     // RouterOS 6 leaves out the "you're online" refresh, like the hotspot check: its report must
     // stay under 4 KB.
     portalRepair(loginTemplateUrl, aloginTemplateUrl, options.hotspotCheck !== false),

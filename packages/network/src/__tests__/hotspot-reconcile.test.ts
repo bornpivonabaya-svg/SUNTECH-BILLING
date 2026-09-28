@@ -70,6 +70,26 @@ describe("router hotspot self-repair", () => {
     expect(writes).toHaveLength(2); // the IP walled-garden entry for the hostname already existed
   });
 
+  it("limits walled-garden addresses to web pages, including entries made before that rule", async () => {
+    const { adapter, writes } = fakeRouter({
+      files: ["hotspot/login.html", "hotspot/alogin.html"],
+      radius: [{ ".id": "*1", address: "192.168.1.183", comment: "MASHUPKGRID" }],
+      walledIp: [
+        { ".id": "*W1", "dst-host": "captive.mashuphost.tech", comment: "MASHUPKGRID" },
+        { ".id": "*W2", "dst-host": "api.mashuphost.tech", comment: "MASHUPKGRID", protocol: "tcp", "dst-port": "80,443" },
+        { ".id": "*W3", "dst-host": "office.example", comment: "added by the ISP" },
+      ],
+      walledHttp: [{ "dst-host": "captive.mashuphost.tech" }, { "dst-host": "pay.pesapal.com" }],
+    });
+    const changes = await adapter.ensureHotspotProvisioning({ ...opts, walledGardenHosts: ["captive.mashuphost.tech", "pay.pesapal.com"] });
+    const newEntry = writes.find((w) => w[0] === "/ip/hotspot/walled-garden/ip/add");
+    expect(newEntry).toEqual(expect.arrayContaining(["=dst-host=pay.pesapal.com", "=protocol=tcp", "=dst-port=80,443"]));
+    // Only the platform's own old entry is narrowed; the ISP's own entry is left alone.
+    expect(writes).toContainEqual(["/ip/hotspot/walled-garden/ip/set", "=.id=*W1", "=protocol=tcp", "=dst-port=80,443"]);
+    expect(writes.some((w) => w.includes("=.id=*W2") || w.includes("=.id=*W3"))).toBe(false);
+    expect(changes).toContain("limited captive.mashuphost.tech to web pages before login");
+  });
+
   it("leaves RADIUS servers the operator added themselves alone", async () => {
     const { adapter, writes } = fakeRouter({
       files: ["hotspot/login.html", "hotspot/alogin.html"],
