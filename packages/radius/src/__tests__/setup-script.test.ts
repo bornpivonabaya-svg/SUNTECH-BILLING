@@ -4,6 +4,7 @@ import {
   buildMikrotikProvisioningScript as buildRawScript,
   buildMikrotikWinboxScript,
   buildHeartbeatScript,
+  ALOGIN_PAGE_MARKER,
   deferred,
   managementSources,
   plainCommands,
@@ -302,5 +303,15 @@ describe("router health report", () => {
     // No more guessing fixed folders.
     expect(report).not.toContain('dst-path=flash/hotspot/login.html');
     expect(report.indexOf("reset-html")).toBeLessThan(report.indexOf(`url="${login}"`));
+  });
+
+  it("downloads the newest 'you're online' page onto routers that have an older one", () => {
+    const login = "https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-login-template";
+    const report = buildHeartbeatScript(callbackUrl, login);
+    expect(report).toContain(':local a [/file find name=($dir . "/alogin.html")]');
+    expect(report).toContain(`[:find [/file get ($a->0) contents] "${ALOGIN_PAGE_MARKER}"]`);
+    expect(report).toContain(
+      ':if ($aok = false) do={:do {/tool fetch url="https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-alogin-template" dst-path=($dir . "/alogin.html")'
+    );
   });
 });
