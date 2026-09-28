@@ -33,7 +33,7 @@ export function chooseTrunkInterface(
   const physical = interfaces.filter((i) => /^(ether|sfp|combo)/.test(i.name) && (i.type === "ether" || i.type === ""));
   const existing = inUse.find((name) => physical.some((i) => i.name === name));
   if (existing) return existing;
-  const taken = new Set(["ether1", ...(router.hotspotPorts.length ? router.hotspotPorts : ["ether2", "ether3", "ether4"]), router.lanPort, router.pppoeInterface].filter(Boolean) as string[]);
+  const taken = new Set(["ether1", ...(router.hotspotPorts.length ? router.hotspotPorts : ["ether2", "ether3", "ether4"]), router.lanPort, ...(router.pppoeInterface ?? "").split(",").map((p) => p.trim())].filter(Boolean) as string[]);
   const free = physical.map((i) => i.name).filter((n) => !taken.has(n));
   const rank = (n: string) => (n.startsWith("sfp") ? 1000 : 0) + Number(n.replace(/\D+/g, "") || 0);
   free.sort((a, b) => rank(b) - rank(a));

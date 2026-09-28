@@ -249,6 +249,41 @@ describe("router setup script — RouterOS version chosen when adding the router
     expect(cards).not.toContain("paystack");
   });
 
+  it("serves PPPoE on several ports through one PPPoE bridge, never the hotspot's", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, {
+      ...base,
+      hotspotPorts: ["ether2", "ether3", "wlan1"],
+      pppoeInterface: "ether4, ether5",
+    });
+    // Out of the hotspot bridge first, then into their own.
+    expect(script).toContain("/interface bridge port remove [find interface=ether4]");
+    expect(script).toContain("/interface bridge port remove [find interface=ether5]");
+    expect(script).not.toContain("/interface bridge port add bridge=bridge interface=ether4");
+    expect(script).toContain("/interface bridge add name=bridge-pppoe");
+    expect(script).toContain("/interface bridge port add bridge=bridge-pppoe interface=ether4");
+    expect(script).toContain("/interface bridge port add bridge=bridge-pppoe interface=ether5");
+    expect(script).toContain("/interface pppoe-server server add service-name=mkg-pppoe interface=bridge-pppoe");
+    expect(script.indexOf("remove [find interface=ether5]")).toBeLessThan(script.indexOf("bridge=bridge-pppoe interface=ether5"));
+    // The hotspot keeps its own ports.
+    expect(script).toContain("/interface bridge port add bridge=bridge interface=ether2");
+  });
+
+  it("serves PPPoE on a single port directly, and a PPPoE-only router keeps just the Wi-Fi on the hotspot", () => {
+    const one = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, pppoeInterface: "ether5" });
+    expect(one).toContain("/interface pppoe-server server add service-name=mkg-pppoe interface=ether5");
+    expect(one).not.toContain("bridge-pppoe");
+    const all = buildMikrotikProvisioningScript(router, credentials, callbackUrl, {
+      ...base,
+      hotspotPorts: ["wlan1"],
+      pppoeInterface: "ether2,ether3,ether4,ether5",
+    });
+    for (const p of ["ether2", "ether3", "ether4", "ether5"]) {
+      expect(all).not.toContain(`/interface bridge port add bridge=bridge interface=${p}`);
+      expect(all).toContain(`/interface bridge port add bridge=bridge-pppoe interface=${p}`);
+    }
+    expect(all).toContain("/interface bridge port add bridge=bridge interface=wlan1");
+  });
+
   it("not chosen: detects on the router and carries both variants", () => {
     const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, base);
     expect(script).toContain("# RouterOS version: detected on the router");

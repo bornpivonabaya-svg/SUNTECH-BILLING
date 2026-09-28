@@ -99,7 +99,8 @@ const pppoeFieldsSchema = {
   pppoeInterface: z
     .string()
     .max(64)
-    .regex(/^[a-zA-Z0-9_.-]*$/, "Interface may only contain letters, numbers, and . _ -")
+    // One port, or several separated by commas ("ether4,ether5"): joined in one PPPoE bridge.
+    .regex(/^[a-zA-Z0-9_.,-]*$/, "Ports may only contain letters, numbers, and . _ - (several separated by commas)")
     .optional(),
   pppoeGatewayIp: z
     .string()

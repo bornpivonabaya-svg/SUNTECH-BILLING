@@ -207,12 +207,21 @@ ${buildAppFilterSection({ portalHosts: opts.portalHosts })}
  *  Without this the router authenticates PPPoE against RADIUS correctly and still cannot accept
  *  a single subscriber, because nothing is listening for PPPoE discovery — exactly the failure
  *  the hotspot had before `/ip hotspot add` was restored. */
+/** The PPPoE ports an ISP chose: one interface ("ether5", "vlan20") or several ("ether4,ether5"). */
+export function pppoePortList(value?: string | null): string[] {
+  return [...new Set((value ?? "").split(",").map((p) => p.trim()).filter(Boolean))];
+}
+
+/** Bridge that joins several PPPoE ports, so the one PPPoE server listens on all of them. */
+export const PPPOE_BRIDGE = "bridge-pppoe";
+
 function buildPppoeSection(
   iface?: string | null,
   gatewayIp?: string | null,
   poolRange?: string | null
 ): string {
-  if (!iface) {
+  const ports = pppoePortList(iface);
+  if (ports.length === 0) {
     return `# 8. PPPoE — not configured for this router. Hotspot works without it; if you sell
 #    PPPoE/fibre subscriptions, set the PPPoE interface and address range on the router in the
 #    dashboard and re-run this script. RADIUS is already wired for PPP, so only the server
@@ -221,19 +230,29 @@ function buildPppoeSection(
 
   const gateway = gatewayIp || "10.10.0.1";
   const range = poolRange || "10.10.0.2-10.10.255.254";
+  // Several ports: joined in their own bridge (never the hotspot's), and the server listens there.
+  const listenOn = ports.length === 1 ? ports[0]! : PPPOE_BRIDGE;
+  const bridgeLines =
+    ports.length === 1
+      ? ""
+      : [
+          `/interface bridge add name=${PPPOE_BRIDGE} comment="MASHUPKGRID PPPOE"`,
+          `/interface bridge port remove [find bridge=${PPPOE_BRIDGE}]`,
+          ...ports.map((p) => `/interface bridge port add bridge=${PPPOE_BRIDGE} interface=${p}`),
+        ].join("\n") + "\n";
 
-  return `# 8. PPPoE Server. RADIUS already knows how to authenticate these subscribers (step 4);
-#    this is the part that listens for them. Each line is idempotent and self-contained, so a
-#    re-run updates rather than duplicates.
-/ip pool remove [find name=mkg-pppoe-pool]
+  return `# 8. PPPoE Server on ${ports.join(", ")}. RADIUS already knows how to authenticate these
+#    subscribers (step 4); this is the part that listens for them. Each line is idempotent and
+#    self-contained, so a re-run updates rather than duplicates.
+${bridgeLines}/ip pool remove [find name=mkg-pppoe-pool]
 /ip pool add name=mkg-pppoe-pool ranges=${range}
 /ppp profile remove [find name=mkg-pppoe]
 /ppp profile add name=mkg-pppoe local-address=${gateway} remote-address=mkg-pppoe-pool
 # The subscriber's speed comes from RADIUS per account (Mikrotik-Rate-Limit), not from this
 # profile — the profile only supplies the addressing, so one profile serves every package.
 /interface pppoe-server server remove [find service-name=mkg-pppoe]
-/interface pppoe-server server add service-name=mkg-pppoe interface=${iface} default-profile=mkg-pppoe one-session-per-host=yes disabled=no
-:put "PPPoE server listening on ${iface}, subscribers get ${range}"`;
+/interface pppoe-server server add service-name=mkg-pppoe interface=${listenOn} default-profile=mkg-pppoe one-session-per-host=yes disabled=no
+:put "PPPoE server listening on ${ports.join(", ")}, subscribers get ${range}"`;
 }
 
 /** Builds the one paste-and-run script a "Link a router" wizard needs before it knows anything
@@ -367,19 +386,20 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
     ? options.hotspotPorts
     : ["ether2", "ether3", "ether4", "wlan1"];
   const lanPort = options.lanPort?.trim() || null;
-  const pppoeIface = options.pppoeInterface?.trim() || null;
+  const pppoePorts = pppoePortList(options.pppoeInterface);
 
   // Filter out any port explicitly assigned to direct LAN, PPPoE, or WAN (ether1)
   let activeHotspotPorts = rawHotspotPorts.filter(
-    (p) => p !== lanPort && p !== pppoeIface && p !== "ether1"
+    (p) => p !== lanPort && !pppoePorts.includes(p) && p !== "ether1"
   );
-  if (activeHotspotPorts.length === 0) {
+  // Nothing left: the old default, unless PPPoE took every port (the hotspot keeps the Wi-Fi).
+  if (activeHotspotPorts.length === 0 && pppoePorts.length === 0) {
     activeHotspotPorts = ["ether2", "ether3"];
   }
 
   // Always bridge wireless radios (wlan1, wifi1) if present and not assigned to LAN / PPPoE
   const wirelessInterfaces = ["wlan1", "wifi1"].filter(
-    (w) => w !== lanPort && w !== pppoeIface && !activeHotspotPorts.includes(w)
+    (w) => w !== lanPort && !pppoePorts.includes(w) && !activeHotspotPorts.includes(w)
   );
 
   const allBridgePorts = [...activeHotspotPorts, ...wirelessInterfaces];
@@ -388,7 +408,7 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
     .map((port) => `:do {/interface bridge port add bridge=bridge interface=${port}} on-error={}`)
     .join("\n");
 
-  const cleanupExcludedPorts = [lanPort, pppoeIface]
+  const cleanupExcludedPorts = [lanPort, ...pppoePorts]
     .filter(Boolean)
     .map((port) => `:do {/interface bridge port remove [find interface=${port}]} on-error={}`)
     .join("\n");
