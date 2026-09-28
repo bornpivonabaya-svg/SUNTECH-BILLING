@@ -84,7 +84,7 @@ export default function LandingEditorPage() {
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Modify announcements, hero copy, CTAs, ROI variables, RouterOS script defaults, pricing tiers, FAQs, and footer settings.
+            Modify announcements, hero copy, CTAs, ROI variables, RouterOS script defaults, FAQs, and footer settings.
           </p>
         </div>
 
@@ -361,112 +361,13 @@ export default function LandingEditorPage() {
               </div>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Starter */}
-              <Card className="p-5 space-y-4 bg-slate-900/80 border-slate-800">
-                <div className="text-sm font-bold text-white">Starter WISP</div>
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <Label className="text-slate-300">Monthly Price (KES)</Label>
-                    <Input
-                      type="number"
-                      value={content.pricing.starterMonthly}
-                      onChange={(e) =>
-                        setContent({
-                          ...content,
-                          pricing: { ...content.pricing, starterMonthly: Number(e.target.value) },
-                        })
-                      }
-                      className="mt-1 bg-slate-950 border-slate-800 text-white font-mono"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-slate-300">Annual Effective/Mo (KES)</Label>
-                    <Input
-                      type="number"
-                      value={content.pricing.starterAnnual}
-                      onChange={(e) =>
-                        setContent({
-                          ...content,
-                          pricing: { ...content.pricing, starterAnnual: Number(e.target.value) },
-                        })
-                      }
-                      className="mt-1 bg-slate-950 border-slate-800 text-white font-mono"
-                    />
-                  </div>
-                </div>
-              </Card>
-
-              {/* Growth */}
-              <Card className="p-5 space-y-4 bg-slate-900/80 border-slate-800 ring-1 ring-brand-500/40">
-                <div className="text-sm font-bold text-brand-400">Growth Operator</div>
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <Label className="text-slate-300">Monthly Price (KES)</Label>
-                    <Input
-                      type="number"
-                      value={content.pricing.growthMonthly}
-                      onChange={(e) =>
-                        setContent({
-                          ...content,
-                          pricing: { ...content.pricing, growthMonthly: Number(e.target.value) },
-                        })
-                      }
-                      className="mt-1 bg-slate-950 border-slate-800 text-white font-mono"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-slate-300">Annual Effective/Mo (KES)</Label>
-                    <Input
-                      type="number"
-                      value={content.pricing.growthAnnual}
-                      onChange={(e) =>
-                        setContent({
-                          ...content,
-                          pricing: { ...content.pricing, growthAnnual: Number(e.target.value) },
-                        })
-                      }
-                      className="mt-1 bg-slate-950 border-slate-800 text-white font-mono"
-                    />
-                  </div>
-                </div>
-              </Card>
-
-              {/* Carrier */}
-              <Card className="p-5 space-y-4 bg-slate-900/80 border-slate-800">
-                <div className="text-sm font-bold text-white">Carrier &amp; Franchise</div>
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <Label className="text-slate-300">Monthly Price (KES)</Label>
-                    <Input
-                      type="number"
-                      value={content.pricing.carrierMonthly}
-                      onChange={(e) =>
-                        setContent({
-                          ...content,
-                          pricing: { ...content.pricing, carrierMonthly: Number(e.target.value) },
-                        })
-                      }
-                      className="mt-1 bg-slate-950 border-slate-800 text-white font-mono"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-slate-300">Annual Effective/Mo (KES)</Label>
-                    <Input
-                      type="number"
-                      value={content.pricing.carrierAnnual}
-                      onChange={(e) =>
-                        setContent({
-                          ...content,
-                          pricing: { ...content.pricing, carrierAnnual: Number(e.target.value) },
-                        })
-                      }
-                      className="mt-1 bg-slate-950 border-slate-800 text-white font-mono"
-                    />
-                  </div>
-                </div>
-              </Card>
-            </div>
+            <Card className="p-5 text-sm text-slate-300 bg-slate-900/80 border-slate-800">
+              The prices on the website are your real plans: the ones ISPs subscribe to. Change them under{" "}
+              <Link href="/plans" className="font-semibold text-brand-400 hover:underline">
+                Plans
+              </Link>
+              .
+            </Card>
           </div>
         )}
 

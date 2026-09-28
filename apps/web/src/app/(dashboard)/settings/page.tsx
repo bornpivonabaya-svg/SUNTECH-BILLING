@@ -140,7 +140,9 @@ export default function SettingsPage() {
         method: "PATCH",
         body: JSON.stringify({ name, timezone, currency, brandColor, logoUrl: logoUrl || null }),
       });
-      const tenantSlug = settings?.slug || user?.tenantSlug || "demo-isp";
+      // Never another ISP's: without this ISP's own address there's no sign-in page to update.
+      const tenantSlug = settings?.slug || user?.tenantSlug;
+      if (!tenantSlug) return;
       const captivePayload = {
         brandName: name.trim(),
         phone: contactPhone.trim(),

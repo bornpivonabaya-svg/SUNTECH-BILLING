@@ -1,78 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiRequestError } from "@/lib/api-client";
-import { Button, Card, Badge, Input, Label, ErrorText } from "@/components/ui";
-import { IconCheck, IconPulse, IconMpesa, IconRouter, IconShield } from "@/components/icons";
+import { Button, Input } from "@/components/ui";
 
-interface TenantPlanDetail {
+/** A plan from the real catalogue (/api/v1/platform/plans), which the server accepts. */
+interface PlanRow {
   id: string;
   name: string;
-  slug: string;
-  monthlyPriceKsh: number;
-  annualPriceKsh: number;
-  maxCustomers: string;
-  maxRouters: string;
-  badge: string;
-  features: string[];
+  monthlyPriceMinor: number;
+  annualPriceMinor: number | null;
+  maxCustomers: number | null;
+  maxRouters: number | null;
+  trialDays: number;
 }
-
-const PLANS: TenantPlanDetail[] = [
-  {
-    id: "plan-starter",
-    name: "Starter WISP",
-    slug: "starter",
-    monthlyPriceKsh: 4500,
-    annualPriceKsh: 3600,
-    maxCustomers: "250 Subscribers",
-    maxRouters: "2 MikroTik Routers",
-    badge: "Emerging Networks",
-    features: [
-      "Up to 250 active PPPoE & Hotspot subscribers",
-      "Connect 2 MikroTik RouterOS gateways",
-      "Automated M-Pesa Paybill C2B reconciliation",
-      "Captive portal voucher generation",
-      "Standard community support",
-    ],
-  },
-  {
-    id: "plan-growth",
-    name: "Growth Telecom",
-    slug: "growth",
-    monthlyPriceKsh: 12500,
-    annualPriceKsh: 10000,
-    maxCustomers: "1,500 Subscribers",
-    maxRouters: "Unlimited Routers",
-    badge: "Most Popular for ISPs",
-    features: [
-      "Up to 1,500 active subscribers",
-      "Unlimited MikroTik routers, OLTs & switches",
-      "Automated WhatsApp Self-Service Billing Bot",
-      "AI Optical Outage & Fiber Cut Pinpointer",
-      "GIS Fiber & Wireless Coverage Checker",
-      "In-Portal Subscriber Speedometer",
-    ],
-  },
-  {
-    id: "plan-enterprise",
-    name: "Carrier Enterprise",
-    slug: "enterprise",
-    monthlyPriceKsh: 35000,
-    annualPriceKsh: 28000,
-    maxCustomers: "Unlimited Subscribers",
-    maxRouters: "Unlimited Routers",
-    badge: "High-Volume ISPs & Carriers",
-    features: [
-      "Unlimited active subscribers & vouchers",
-      "Dedicated FreeRADIUS 3.2 High-Availability VM",
-      "Custom white-label domain with dedicated SSL",
-      "BGP / OSPF multi-POP routing telemetry",
-      "Direct WhatsApp NOC bridge & 99.99% SLA",
-      "24/7 dedicated telecom engineer access",
-    ],
-  },
-];
 
 interface Props {
   tenant: {
@@ -87,240 +29,238 @@ interface Props {
   onClose: () => void;
 }
 
+type Action = "trial" | "paid" | "plan";
+
+const ACTIONS: { id: Action; label: string; hint: string }[] = [
+  { id: "trial", label: "Free trial", hint: "Unlocks everything for the days you choose. Nothing is charged." },
+  { id: "paid", label: "Paid (cash, bank…)", hint: "Activates the plan for the months paid and records the payment in their billing history." },
+  { id: "plan", label: "Change plan only", hint: "Switches their plan and limits. Their paid-until date doesn't change." },
+];
+
+const kes = (minor: number) => `KES ${Math.round(minor / 100).toLocaleString()}`;
+const limit = (n: number | null, what: string) => (n === null ? `Unlimited ${what}` : `${n.toLocaleString()} ${what}`);
+
+const selectClass =
+  "rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-obsidian-700 dark:bg-obsidian-950 dark:text-slate-100";
+
+/**
+ * Super admin: give an ISP a free trial, activate a plan they paid for outside M-Pesa, or change
+ * their plan. Uses the platform's real plans; each action calls its own endpoint in
+ * apps/api/src/routes/tenants.ts (/trial, /subscription/activate, /subscription).
+ */
 export function UpgradeTenantModal({ tenant, onClose }: Props) {
   const queryClient = useQueryClient();
-  const [billingCycle, setBillingCycle] = useState<"MONTHLY" | "ANNUAL">(
-    tenant.subscription?.billingCycle ?? "MONTHLY"
-  );
-  const [selectedPlanId, setSelectedPlanId] = useState<string>(
-    tenant.subscription?.plan?.id ?? PLANS[1]!.id
-  );
-  const [chargePhone, setChargePhone] = useState("");
-  const [chargeMethod, setChargeMethod] = useState<"instant" | "mpesa">("instant");
+  const [action, setAction] = useState<Action>("trial");
+  const [planId, setPlanId] = useState(tenant.subscription?.plan?.id ?? "");
+  const [trialDays, setTrialDays] = useState(14);
+  const [months, setMonths] = useState(1);
+  const [amountKes, setAmountKes] = useState("");
+  const [reference, setReference] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [stkDispatched, setStkDispatched] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
 
-  const selectedPlan = PLANS.find((p) => p.id === selectedPlanId) ?? PLANS[1]!;
-  const price = billingCycle === "MONTHLY" ? selectedPlan.monthlyPriceKsh : selectedPlan.annualPriceKsh;
+  const plans = useQuery({
+    queryKey: ["platform-plans"],
+    queryFn: () => apiFetch<PlanRow[]>("/api/v1/platform/plans"),
+  });
+  const selectedPlan = plans.data?.find((p) => p.id === planId) ?? null;
 
-  const applyPlanChange = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/v1/platform/tenants/${tenant.id}/subscription`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          planId: selectedPlanId,
-          billingCycle,
-        }),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tenants"] });
-      onClose();
+  const run = useMutation({
+    mutationFn: async (): Promise<string> => {
+      const base = `/api/v1/platform/tenants/${tenant.id}`;
+      if (action === "trial") {
+        const r = await apiFetch<{ trialEndsAt: string }>(`${base}/trial`, {
+          method: "POST",
+          body: JSON.stringify({ action: "extend", days: trialDays }),
+        });
+        // A chosen plan sets the limits during the trial too.
+        if (planId && planId !== tenant.subscription?.plan?.id) {
+          await apiFetch(`${base}/subscription`, { method: "PATCH", body: JSON.stringify({ planId }) });
+        }
+        return `Free trial until ${new Date(r.trialEndsAt).toLocaleDateString()}.`;
+      }
+      if (action === "paid") {
+        const r = await apiFetch<{ planName: string; activeUntil: string }>(`${base}/subscription/activate`, {
+          method: "POST",
+          body: JSON.stringify({
+            months,
+            ...(planId ? { planId } : {}),
+            ...(amountKes.trim() ? { amountKes: Number(amountKes) } : {}),
+            ...(reference.trim() ? { reference: reference.trim() } : {}),
+          }),
+        });
+        return `${r.planName} is active until ${new Date(r.activeUntil).toLocaleDateString()}.`;
+      }
+      await apiFetch(`${base}/subscription`, { method: "PATCH", body: JSON.stringify({ planId }) });
+      return `Plan changed to ${selectedPlan?.name ?? "the chosen plan"}.`;
     },
-    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to update plan"),
+    onSuccess: (message) => {
+      setError(null);
+      setDone(message);
+      queryClient.invalidateQueries({ queryKey: ["tenants"] });
+    },
+    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "That didn't work. Try again."),
   });
 
-  const handleChargeMpesa = () => {
-    if (!chargePhone.trim()) {
-      setError("Please provide a valid M-Pesa phone number");
-      return;
-    }
-    setError(null);
-    setStkDispatched(true);
-    setTimeout(() => {
-      applyPlanChange.mutate();
-    }, 2000);
-  };
+  const needsPlan = action === "plan" || (action === "paid" && !tenant.subscription);
+  const canSubmit = !run.isPending && !(needsPlan && !planId);
+  const buttonLabel =
+    action === "trial"
+      ? `Give ${trialDays}-day free trial`
+      : action === "paid"
+        ? `Activate ${months} month${months > 1 ? "s" : ""}`
+        : "Change plan";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-      <div className="relative w-full max-w-3xl rounded-xl border border-slate-800 bg-slate-950 p-6 sm:p-8 space-y-6 shadow-lg text-left font-sans max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label={`Plan for ${tenant.name}`}>
+      <div className="max-h-[90vh] w-full max-w-2xl space-y-5 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 text-left shadow-lg dark:border-obsidian-800 dark:bg-obsidian-950 sm:p-6">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <Badge variant="info">Subscription Upgrade</Badge>
-              <span className="font-mono text-xs text-slate-400">
-                Tenant: <strong className="text-white">{tenant.name}</strong> ({tenant.slug})
-              </span>
-            </div>
-            <h3 className="text-xl sm:text-2xl font-bold text-white mt-1">
-              Upgrade Operator Plan &amp; Quota
-            </h3>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Plan &amp; trial</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {tenant.name} · {tenant.subscription?.plan ? `on ${tenant.subscription.plan.name}` : "no plan yet"}
+            </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="h-8 w-8 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-sm"
+            aria-label="Close"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-obsidian-800 dark:hover:text-white"
           >
             ✕
           </button>
         </div>
-        {/* Billing Cycle Switcher */}
-        <div className="flex items-center justify-center">
-          <div className="inline-flex items-center gap-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800 text-xs font-bold font-mono">
-            <button
-              type="button"
-              onClick={() => setBillingCycle("MONTHLY")}
-              className={`px-4 py-1.5 rounded-lg transition-all ${
-                billingCycle === "MONTHLY" ? "bg-brand-600 text-white shadow-glow" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Monthly Billing
-            </button>
-            <button
-              type="button"
-              onClick={() => setBillingCycle("ANNUAL")}
-              className={`px-4 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-                billingCycle === "ANNUAL" ? "bg-emerald-600 text-white shadow-glow-emerald" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <span>Annual Billing</span>
-              <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] text-emerald-300">
-                Save 20%
-              </span>
-            </button>
-          </div>
-        </div>
-        {/* 3 Tier Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {PLANS.map((plan) => {
-            const isSelected = selectedPlanId === plan.id;
-            const currentPrice = billingCycle === "MONTHLY" ? plan.monthlyPriceKsh : plan.annualPriceKsh;
 
-            return (
-              <div
-                key={plan.id}
-                onClick={() => setSelectedPlanId(plan.id)}
-                className={`p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-4 relative ${
-                  isSelected
-                    ? "bg-slate-900 border-brand-500 shadow-glow ring-1 ring-brand-500/40"
-                    : "bg-slate-950 border-slate-800 hover:border-slate-700"
-                }`}
-              >
-                {isSelected && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-brand-600 text-white text-[10px] font-mono font-bold shadow-md">
-                    SELECTED PLAN
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-start">
-                    <span className="text-[10px] font-mono text-white uppercase font-bold">{plan.badge}</span>
-                  </div>
-                  <h4 className="text-base font-bold text-white">{plan.name}</h4>
-                  <div className="font-mono">
-                    <span className="text-2xl font-bold text-white">KES {currentPrice.toLocaleString()}</span>
-                    <span className="text-[11px] text-slate-500"> /mo</span>
-                  </div>
-                  <div className="text-[11px] font-mono text-emerald-400 bg-slate-950 p-1.5 rounded border border-slate-800">
-                    {plan.maxCustomers} · {plan.maxRouters}
-                  </div>
-                </div>
-                <div className="space-y-1.5 pt-2 border-t border-slate-800/80 text-xs text-slate-300">
-                  {plan.features.slice(0, 4).map((f, idx) => (
-                    <div key={idx} className="flex items-start gap-1.5 text-[11px]">
-                      <span className="leading-tight">{f}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+        {/* What to do */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {ACTIONS.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => {
+                setAction(a.id);
+                setDone(null);
+                setError(null);
+              }}
+              className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                action === a.id
+                  ? "border-brand-500 bg-brand-50 font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300"
+                  : "border-slate-200 text-slate-700 hover:border-slate-300 dark:border-obsidian-800 dark:text-slate-300 dark:hover:border-obsidian-700"
+              }`}
+            >
+              {a.label}
+            </button>
+          ))}
         </div>
-        {/* Upgrade Execution Methods */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400">
-            <span>Selected Upgrade: <strong className="text-white">{selectedPlan.name}</strong> ({billingCycle})</span>
-            <span>Total Payable: <strong className="text-emerald-400">KES {price.toLocaleString()}</strong></span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <button
-              type="button"
-              onClick={() => setChargeMethod("instant")}
-              className={`p-3 rounded-xl border text-left transition-all ${
-                chargeMethod === "instant"
-                  ? "bg-slate-900 border-brand-500 shadow-sm"
-                  : "bg-slate-950 border-slate-800 hover:border-slate-700"
-              }`}
-            >
-              <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <IconCheck size={14} className="text-brand-400" />
-                <span>Immediate Quota Provisioning</span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Assign plan now; invoice or collect payment later.
-              </p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setChargeMethod("mpesa")}
-              className={`p-3 rounded-xl border text-left transition-all ${
-                chargeMethod === "mpesa"
-                  ? "bg-slate-900 border-emerald-500 shadow-glow-emerald"
-                  : "bg-slate-950 border-slate-800 hover:border-slate-700"
-              }`}
-            >
-              <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <IconMpesa size={14} />
-                <span>Instant M-Pesa STK Push Charge</span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Prompt owner phone immediately for KES {price.toLocaleString()}.
-              </p>
-            </button>
-          </div>
-          {chargeMethod === "mpesa" && (
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-              <Label htmlFor="owner-phone">Owner Safaricom M-Pesa Phone Number</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="owner-phone"
-                  value={chargePhone}
-                  onChange={(e) => setChargePhone(e.target.value)}
-                  placeholder="0712345678"
-                  className="font-mono text-xs"
-                />
-              </div>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{ACTIONS.find((a) => a.id === action)!.hint}</p>
+
+        {/* Plans */}
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Plan{action === "trial" ? " (optional)" : ""}
+          </p>
+          {plans.isLoading ? (
+            <p className="text-sm text-slate-500">Loading plans…</p>
+          ) : plans.isError ? (
+            <p className="text-sm text-rose-600 dark:text-rose-400">Could not load plans.</p>
+          ) : plans.data && plans.data.length > 0 ? (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {plans.data.map((p) => {
+                const selected = planId === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPlanId(selected && action === "trial" ? "" : p.id)}
+                    className={`rounded-lg border p-3 text-left transition-colors ${
+                      selected
+                        ? "border-brand-500 ring-1 ring-brand-500/40"
+                        : "border-slate-200 hover:border-slate-300 dark:border-obsidian-800 dark:hover:border-obsidian-700"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {p.name}
+                      {tenant.subscription?.plan?.id === p.id && <span className="ml-1 text-xs font-normal text-slate-500">(current)</span>}
+                    </p>
+                    <p className="text-sm text-slate-700 dark:text-slate-300">{kes(p.monthlyPriceMinor)}/mo</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {limit(p.maxRouters, "routers")} · {limit(p.maxCustomers, "customers")}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
+          ) : (
+            <p className="text-sm text-slate-500">No plans yet. Create one under Plans.</p>
           )}
         </div>
-        {error && <ErrorText>{error}</ErrorText>}
 
-        {stkDispatched && (
-          <div className="p-3 rounded-xl bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-xs font-mono text-center flex items-center justify-center gap-2 animate-pulse">
-            <IconCheck size={16} />
-            <span>M-Pesa STK prompt dispatched! Upgrading tenant upon confirmation...</span>
+        {/* Details for the chosen action */}
+        {action === "trial" && (
+          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            Free for
+            <select aria-label="Trial days" className={selectClass} value={trialDays} onChange={(e) => setTrialDays(Number(e.target.value))}>
+              {[7, 14, 30, 60, 90].map((d) => (
+                <option key={d} value={d}>
+                  {d} days
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-500">added after any trial time left</span>
+          </label>
+        )}
+        {action === "paid" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <select aria-label="Months" className={selectClass} value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+              {[1, 2, 3, 6, 12].map((m) => (
+                <option key={m} value={m}>
+                  {m} month{m > 1 ? "s" : ""}
+                </option>
+              ))}
+            </select>
+            <Input
+              aria-label="Amount paid (KES)"
+              inputMode="decimal"
+              placeholder={selectedPlan ? `KES ${Math.round((selectedPlan.monthlyPriceMinor * months) / 100).toLocaleString()}` : "Amount KES"}
+              value={amountKes}
+              onChange={(e) => setAmountKes(e.target.value.replace(/[^\d.]/g, ""))}
+              className="!w-40"
+            />
+            <Input
+              aria-label="Reference"
+              placeholder="Reference (receipt, bank ref…)"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className="!w-56"
+            />
           </div>
         )}
 
-        {/* Modal Actions */}
-        <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-bold text-slate-300 transition-colors"
+        {error && (
+          <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">
+            {error}
+          </p>
+        )}
+        {done && (
+          <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">
+            ✓ {done}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-obsidian-800">
+          <Button variant="secondary" onClick={onClose}>
+            {done ? "Close" : "Cancel"}
+          </Button>
+          <Button
+            disabled={!canSubmit}
+            onClick={() => {
+              setDone(null);
+              setError(null);
+              run.mutate();
+            }}
           >
-            Cancel
-          </button>
-          {chargeMethod === "instant" ? (
-            <Button
-              onClick={() => applyPlanChange.mutate()}
-              disabled={applyPlanChange.isPending}
-              className="px-6 py-2.5 font-bold shadow-glow text-xs gap-2"
-            >
-              {applyPlanChange.isPending ? <IconPulse size={14} className="animate-spin" /> : <IconCheck size={14} />}
-              <span>{applyPlanChange.isPending ? "Assigning Plan..." : `Upgrade to ${selectedPlan.name}`}</span>
-            </Button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleChargeMpesa}
-              disabled={stkDispatched || !chargePhone.trim()}
-              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-glow-emerald transition-all flex items-center gap-2"
-            >
-              <IconMpesa size={16} />
-              <span>Charge KES {price.toLocaleString()} via M-Pesa</span>
-            </button>
-          )}
+            {run.isPending ? "Saving…" : buttonLabel}
+          </Button>
         </div>
       </div>
     </div>

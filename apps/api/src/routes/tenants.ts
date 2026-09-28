@@ -903,13 +903,18 @@ interface TenantUsage {
             data: { planId, ...(billingCycle ? { billingCycle } : {}) },
           })
         : await prisma.tenantSubscription.create({
-            data: {
-              tenantId,
-              planId,
-              billingCycle: billingCycle ?? "MONTHLY",
-              status: "ACTIVE",
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            },
+            // An ISP still on its free trial stays on it: choosing a plan sets its limits, it
+            // doesn't mark it paid. Otherwise, as before, 30 days active.
+            data:
+              tenant.trialEndsAt && tenant.trialEndsAt > new Date()
+                ? { tenantId, planId, billingCycle: billingCycle ?? "MONTHLY", status: "TRIALING", currentPeriodEnd: tenant.trialEndsAt }
+                : {
+                    tenantId,
+                    planId,
+                    billingCycle: billingCycle ?? "MONTHLY",
+                    status: "ACTIVE",
+                    currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                  },
           });
 
       await writeAuditLog({

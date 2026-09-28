@@ -18,7 +18,7 @@ export default function RefundPolicyPage() {
           title: "SaaS Subscription 14-Day Guarantee",
           body: (
             <>
-              For newly registered ISPs purchasing a paid platform tier (Starter WISP or Growth Telecom), we provide a 14-day full refund guarantee if the platform fails to integrate with your verified MikroTik hardware or Safaricom Daraja API credentials. Refund requests can be initiated directly from Settings &rarr; Billing.
+              For newly registered ISPs purchasing a paid platform plan, we provide a 14-day full refund guarantee if the platform fails to integrate with your verified MikroTik hardware or Safaricom Daraja API credentials. Refund requests can be initiated directly from Settings &rarr; Billing.
             </>
           ),
         },

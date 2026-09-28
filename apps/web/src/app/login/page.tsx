@@ -14,7 +14,6 @@ import { TwoStepSignIn } from "@/components/auth/two-step";
 import type { SecondStep } from "@/lib/auth-context";
 import { IconArrowRight, IconCheck, IconEye, IconEyeOff } from "@/components/icons";
 import { Logo } from "@/components/marketing/brand";
-import { DashboardOverviewPreview } from "@/components/marketing/dashboard-preview";
 
 const loginSchema = z.object({
   tenantSlug: z.string().optional(),
@@ -255,7 +254,6 @@ function LoginContent() {
           <nav aria-label="Legal" className="flex flex-wrap gap-x-4 gap-y-1">
             <Link href="/terms" className="hover:text-slate-800">Terms</Link>
             <Link href="/refund-policy" className="hover:text-slate-800">Refunds</Link>
-            <Link href="/referral-policy" className="hover:text-slate-800">Referrals</Link>
             <Link href="/age-policy" className="hover:text-slate-800">Age policy</Link>
           </nav>
         </footer>
@@ -277,9 +275,6 @@ function LoginContent() {
               </li>
             ))}
           </ul>
-          <div className="mt-10 -mr-24 xl:-mr-32">
-            <DashboardOverviewPreview />
-          </div>
         </aside>
       )}
     </div>

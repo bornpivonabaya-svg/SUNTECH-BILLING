@@ -4,14 +4,10 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiRequestError } from "@/lib/api-client";
 import { Button, Card, ErrorText, HintText, Input, Label, Badge } from "@/components/ui";
+import { TENANT_FEATURES as SHARED_TENANT_FEATURES, TENANT_FEATURE_LABELS } from "@mashupkgrid/shared/src/features";
 
-const TENANT_FEATURES = [
-  { key: "AI_ASSISTANT", label: "AI Assistant" },
-  { key: "LIVE_CHAT", label: "Live Chat" },
-  { key: "WIREGUARD_REMOTE_ACCESS", label: "WireGuard Remote Access" },
-  { key: "HOTSPOT_VOUCHERS", label: "Hotspot Vouchers" },
-  { key: "SUPPORT_TICKETS", label: "Support Tickets" },
-] as const;
+// One list for the whole platform (packages/shared features.ts), so a new feature shows up here.
+const TENANT_FEATURES = SHARED_TENANT_FEATURES.map((key) => ({ key, label: TENANT_FEATURE_LABELS[key] }));
 
 interface Plan {
   id: string;

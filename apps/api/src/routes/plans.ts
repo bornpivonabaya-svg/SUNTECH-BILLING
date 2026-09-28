@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@mashupkgrid/database";
+import { env } from "@mashupkgrid/config";
 import { successResponse, ConflictError, NotFoundError, TENANT_FEATURES } from "@mashupkgrid/shared";
 import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
 import { requirePermission } from "../plugins/authorize.js";
+import { ensureDefaultPlans } from "../lib/default-plans.js";
 import { writeAuditLog } from "../lib/audit.js";
 
 const preHandler = [authenticate, resolveTenant, checkMaintenance] as const;
@@ -49,6 +51,8 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     "/",
     { config: { audience: "staff" }, preHandler: [...preHandler] },
     async (request, reply) => {
+      // A new platform starts with the default plans rather than an empty list.
+      await ensureDefaultPlans().catch(() => 0);
       const plans = await prisma.tenantPlan.findMany({
         where: { isActive: true },
         orderBy: { sortOrder: "asc" },
@@ -139,4 +143,28 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
       reply.send(successResponse(after, request.id));
     }
   );
+}
+
+/** The active plans for the public pricing section on the landing page: names, prices, limits
+ *  and trial length only. The same catalogue ISPs subscribe to, so the website never shows a
+ *  price the platform doesn't charge. */
+export async function publicPlanRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/", { config: { audience: "public" } }, async (request, reply) => {
+    await ensureDefaultPlans().catch(() => 0);
+    const plans = await prisma.tenantPlan.findMany({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { monthlyPriceMinor: "asc" }],
+      select: { id: true, name: true, description: true, monthlyPriceMinor: true, annualPriceMinor: true, trialDays: true, maxCustomers: true, maxRouters: true, isDefault: true },
+    });
+    reply.header("Cache-Control", "public, max-age=60").send(successResponse(plans, request.id));
+  });
+}
+
+/** Public settings the website needs at run time rather than build time: the captive portal's
+ *  address (APP_PORTAL_URL), shown to ISPs as their customers' sign-in link. */
+export async function publicConfigRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/", { config: { audience: "public" } }, async (request, reply) => {
+    const portalUrl = ((env as { APP_PORTAL_URL?: string }).APP_PORTAL_URL || env.APP_WEB_URL || "").replace(/\/+$/, "");
+    reply.header("Cache-Control", "public, max-age=300").send(successResponse({ portalUrl }, request.id));
+  });
 }
