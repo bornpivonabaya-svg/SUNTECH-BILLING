@@ -11,9 +11,29 @@ describe("the router's 'you're online' page", () => {
     expect(html).toContain("$(session-time-left)");
   });
 
-  it("moves the window on to the page they asked for, so the phone closes its sign-in window", () => {
-    expect(html).toContain('<meta http-equiv="refresh" content="3; url=$(link-redirect)">');
-    expect(html).toContain('href="$(link-redirect)"');
+  it("moves the window on to a real page, never back to the phone's connectivity check", () => {
+    // generate_204 answers with nothing, so going back to it left Android's sign-in window open.
+    expect(html).not.toContain("url=$(link-redirect)");
+    expect(html).toContain('decodeURIComponent("$(link-redirect-esc)")');
+    expect(html).toContain('href="http://www.google.com/"');
+    expect(html).toContain("mkg-alogin-2");
+  });
+
+  it("sends a connectivity check to Google and any other page back to itself", () => {
+    const script = html.slice(html.indexOf("<script>") + 8, html.indexOf("</script>"));
+    const destination = (redirect: string) => {
+      const go = { href: "" };
+      let replaced = "";
+      const run = new Function("document", "window", "setTimeout", script.replace("$(link-redirect-esc)", encodeURIComponent(redirect)));
+      run({ getElementById: () => go }, { location: { replace: (u: string) => (replaced = u) } }, (f: () => void) => f());
+      expect(replaced).toBe(go.href);
+      return go.href;
+    };
+    expect(destination("http://connectivitycheck.gstatic.com/generate_204")).toBe("http://www.google.com/");
+    expect(destination("http://captive.apple.com/hotspot-detect.html")).toBe("http://www.google.com/");
+    expect(destination("http://www.msftconnecttest.com/connecttest.txt")).toBe("http://www.google.com/");
+    expect(destination("")).toBe("http://www.google.com/");
+    expect(destination("http://news.example.com/today")).toBe("http://news.example.com/today");
   });
 
   it("escapes the ISP's name and can't be used to inject a router variable", () => {
