@@ -198,14 +198,20 @@ describe("router setup script — RouterOS version chosen when adding the router
     }
   });
 
-  it("shares the internet with hotspot customers whichever port the internet comes in on", () => {
-    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, base);
+  it("shares the internet with every customer (hotspot, PPPoE, VLAN) whichever port it comes in on", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { ...base, pppoeInterface: "ether5" });
     expect(script).toContain("/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade");
+    for (const range of ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]) {
+      expect(script).toContain(`/ip firewall address-list add list=mkg-private address=${range}`);
+    }
+    // Private to public only: traffic between the router's own networks is never touched.
     expect(script).toContain(
-      '/ip firewall nat add chain=srcnat src-address=192.168.88.0/24 out-interface=!bridge action=masquerade comment="MASHUPKGRID LAN NAT"'
+      '/ip firewall nat add chain=srcnat src-address-list=mkg-private dst-address-list=!mkg-private action=masquerade comment="MASHUPKGRID LAN NAT"'
     );
+    // The PPPoE pool (10.10.x.x) is inside the private ranges, so its customers are covered.
+    expect(script).toContain("ranges=10.10.0.2-10.10.255.254");
     // Replaced, not piled up, when the script runs again.
-    expect(script.indexOf('remove [find comment="MASHUPKGRID LAN NAT"]')).toBeLessThan(script.indexOf("out-interface=!bridge"));
+    expect(script.indexOf('remove [find comment="MASHUPKGRID LAN NAT"]')).toBeLessThan(script.indexOf("dst-address-list=!mkg-private"));
   });
 
   it("lets unpaid devices open only web pages on walled-garden addresses, and stops DNS tunnels", () => {
@@ -353,12 +359,15 @@ describe("router health report", () => {
     expect(report.indexOf("reset-html")).toBeLessThan(report.indexOf(`url="${login}"`));
   });
 
-  it("shares the internet with signed-in customers whichever port it arrives on", () => {
-    const report = buildHeartbeatScript(callbackUrl);
-    // Added only when missing, so a healthy router writes nothing each minute.
-    expect(report).toContain(
-      ':do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID LAN NAT"]] = 0) do={/ip firewall nat add chain=srcnat src-address=192.168.88.0/24 out-interface=!bridge action=masquerade comment="MASHUPKGRID LAN NAT"}} on-error={}'
-    );
+  it("shares the internet with every customer whichever port it arrives on, on routers set up earlier too", () => {
+    for (const report of [buildHeartbeatScript(callbackUrl)]) {
+      // Fills the private-ranges list and replaces the first, hotspot-only rule; a healthy router
+      // (3 list entries, 1 current rule) writes nothing.
+      expect(report).toContain(':if ([:len [/ip firewall address-list find list=mkg-private]] != 3) do={');
+      expect(report).toContain(
+        ':if ([:len [/ip firewall nat find comment="MASHUPKGRID LAN NAT" src-address-list=mkg-private]] != 1) do={/ip firewall nat remove [find comment="MASHUPKGRID LAN NAT"]; /ip firewall nat add chain=srcnat src-address-list=mkg-private dst-address-list=!mkg-private action=masquerade comment="MASHUPKGRID LAN NAT"}'
+      );
+    }
   });
 
   it("brings routers set up earlier to the same unpaid-device limits", () => {
@@ -395,7 +404,8 @@ describe("router health report", () => {
     const v6 = buildHeartbeatScript(long, login, { hotspotCheck: false });
     expect(v6.length).toBeLessThan(3900);
     expect(v6).not.toContain(ALOGIN_PAGE_MARKER);
-    expect(v6).toContain("MASHUPKGRID LAN NAT");
+    // v6 gets the NAT rule from its setup script.
+    expect(v6).not.toContain("MASHUPKGRID LAN NAT");
   });
 
   it("downloads the newest 'you're online' page onto routers that have an older one", () => {
