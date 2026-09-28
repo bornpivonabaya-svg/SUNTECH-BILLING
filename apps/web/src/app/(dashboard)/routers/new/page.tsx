@@ -32,7 +32,27 @@ const STEPS: { n: Step; label: string }[] = [
   { n: 3, label: "Done" },
 ];
 
-const LAN_PORTS = ["ether2", "ether3", "ether4", "ether5"] as const;
+/** What one port on the router is for. */
+type PortRole = "hotspot" | "pppoe" | "office";
+const ROLE_LABEL: Record<PortRole, string> = { hotspot: "Hotspot", pppoe: "PPPoE customers", office: "Office (no sign-in)" };
+const ROLE_TONE: Record<PortRole, string> = {
+  hotspot: "border-blue-600 bg-blue-600 text-white",
+  pppoe: "border-purple-600 bg-purple-600 text-white",
+  office: "border-emerald-600 bg-emerald-600 text-white",
+};
+/** Common MikroTik sizes: hAP lite (4), hAP ac² / RB750 (5), RB2011 / hEX S (8 or so), RB4011 (10), CCR (13). */
+const PORT_COUNTS = [4, 5, 8, 10, 13] as const;
+
+/** ether2…etherN: ether1 is always the internet. */
+const lanPorts = (count: number) => Array.from({ length: count - 1 }, (_, i) => `ether${i + 2}`);
+
+/** A sensible start for each use; every port can be changed after. */
+function defaultRoles(use: Use, count: number): Record<string, PortRole> {
+  const ports = lanPorts(count);
+  return Object.fromEntries(
+    ports.map((p, i) => [p, use === "pppoe" ? "pppoe" : use === "both" && i === ports.length - 1 ? "pppoe" : "hotspot"])
+  );
+}
 
 function StepDots({ current }: { current: Step }) {
   return (
@@ -123,11 +143,11 @@ export default function LinkRouterWizardPage() {
 
   const [name, setName] = useState("");
   const [use, setUse] = useState<Use>("hotspot");
-  const [pppoePort, setPppoePort] = useState("ether5");
+  const [portCount, setPortCount] = useState<number>(5);
+  const [roles, setRoles] = useState<Record<string, PortRole>>(() => defaultRoles("hotspot", 5));
 
   // Advanced — safe defaults for a normal setup.
   const [routerOsMajor, setRouterOsMajor] = useState<6 | 7 | null>(null);
-  const [lanPort, setLanPort] = useState<string>("none");
   const [blockTethering, setBlockTethering] = useState(false);
   const [pppoeGatewayIp, setPppoeGatewayIp] = useState("10.10.0.1");
   const [pppoePoolRange, setPppoePoolRange] = useState("10.10.0.2-10.10.255.254");
@@ -138,20 +158,34 @@ export default function LinkRouterWizardPage() {
   const [oneLiner, setOneLiner] = useState<string>("");
   const [waitedSeconds, setWaitedSeconds] = useState(0);
 
+  const ports = lanPorts(portCount);
+  const roleOf = (p: string): PortRole => roles[p] ?? "hotspot";
+  const pppoePorts = ports.filter((p) => roleOf(p) === "pppoe");
+  const officePort = ports.find((p) => roleOf(p) === "office") ?? null;
   const hasPppoe = use !== "hotspot";
   const hasHotspot = use !== "pppoe";
-  // Every LAN port that isn't PPPoE's or the office port serves the hotspot, plus the Wi-Fi.
-  const hotspotPorts = hasHotspot
-    ? [...LAN_PORTS.filter((p) => !(hasPppoe && p === pppoePort) && p !== lanPort), "wlan1"]
-    : [];
+  // The Wi-Fi always runs the hotspot (walk-in customers); PPPoE customers come in by cable.
+  const hotspotPorts = [...ports.filter((p) => roleOf(p) === "hotspot"), "wlan1"];
+  const roleChoices: PortRole[] = use === "hotspot" ? ["hotspot", "office"] : use === "pppoe" ? ["pppoe", "office"] : ["hotspot", "pppoe", "office"];
 
-  /** The port picture: what each socket on the router does, in words. */
-  const portRole = (p: string): { label: string; tone: string } => {
-    if (hasPppoe && p === pppoePort) return { label: "Home customers (PPPoE)", tone: "bg-purple-600 text-white" };
-    if (p === lanPort) return { label: "Office (no sign-in)", tone: "bg-emerald-600 text-white" };
-    if (hasHotspot) return { label: "Hotspot", tone: "bg-blue-600 text-white" };
-    return { label: "Not used", tone: "bg-slate-100 text-slate-500 dark:bg-obsidian-800 dark:text-slate-400" };
+  const chooseUse = (u: Use) => {
+    setUse(u);
+    setRoles(defaultRoles(u, portCount));
   };
+  const choosePortCount = (n: number) => {
+    setPortCount(n);
+    // Keep what was already chosen for the ports that still exist.
+    setRoles((prev) => ({ ...defaultRoles(use, n), ...Object.fromEntries(Object.entries(prev).filter(([p]) => lanPorts(n).includes(p))) }));
+  };
+  const setRole = (port: string, role: PortRole) =>
+    setRoles((prev) => {
+      const next = { ...prev, [port]: role };
+      // One office port: choosing another hands the old one back to the router's main use.
+      if (role === "office") {
+        for (const p of Object.keys(next)) if (p !== port && next[p] === "office") next[p] = use === "pppoe" ? "pppoe" : "hotspot";
+      }
+      return next;
+    });
 
   const createPending = useMutation({
     mutationFn: () =>
@@ -161,9 +195,9 @@ export default function LinkRouterWizardPage() {
           name,
           routerOsMajor,
           hotspotPorts,
-          lanPort: lanPort !== "none" ? lanPort : null,
-          ...(hasPppoe
-            ? { pppoeInterface: pppoePort, pppoeGatewayIp: pppoeGatewayIp.trim(), pppoePoolRange: pppoePoolRange.trim() }
+          lanPort: officePort,
+          ...(pppoePorts.length
+            ? { pppoeInterface: pppoePorts.join(","), pppoeGatewayIp: pppoeGatewayIp.trim(), pppoePoolRange: pppoePoolRange.trim() }
             : {}),
           blockTethering,
         }),
@@ -269,65 +303,74 @@ export default function LinkRouterWizardPage() {
               <div className="mt-1 flex flex-col gap-2 sm:flex-row" role="radiogroup" aria-label="What is this router for?">
                 <Choice
                   selected={use === "hotspot"}
-                  onClick={() => setUse("hotspot")}
+                  onClick={() => chooseUse("hotspot")}
                   title="Hotspot"
                   body="Walk-in customers buy a voucher or pay by M-Pesa on the sign-in page."
                 />
                 <Choice
                   selected={use === "pppoe"}
-                  onClick={() => setUse("pppoe")}
+                  onClick={() => chooseUse("pppoe")}
                   title="PPPoE"
                   body="Home or office customers on a monthly plan, with their own router."
                 />
-                <Choice selected={use === "both"} onClick={() => setUse("both")} title="Both" body="Hotspot on the Wi-Fi, and PPPoE on one port." />
+                <Choice selected={use === "both"} onClick={() => chooseUse("both")} title="Both" body="Hotspot on the Wi-Fi and some ports, PPPoE on the ports you choose." />
               </div>
             </div>
 
-            {hasPppoe && (
-              <div className="mt-5">
-                <Label>3. Which port does the cable to your PPPoE customers go into?</Label>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {LAN_PORTS.map((p) => (
-                    <Chip
-                      key={p}
-                      selected={pppoePort === p}
-                      onClick={() => {
-                        setPppoePort(p);
-                        if (lanPort === p) setLanPort("none");
-                      }}
-                    >
-                      {p}
-                    </Chip>
-                  ))}
-                </div>
-                <HintText>Usually the last port (ether5), to your switch or access points. Never port 1: that&apos;s your internet.</HintText>
+            <div className="mt-5">
+              <Label>3. How many ports does your router have?</Label>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {PORT_COUNTS.map((n) => (
+                  <Chip key={n} selected={portCount === n} onClick={() => choosePortCount(n)}>
+                    {n} ports
+                  </Chip>
+                ))}
               </div>
-            )}
+              <HintText>Count the ethernet sockets on the router (hAP lite: 4, hAP ac² or RB750: 5, RB4011: 10).</HintText>
+            </div>
 
-            {/* The ports, as the ISP will cable them. */}
+            {/* The ports, as the ISP will cable them: one drop-down per port. */}
             <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-obsidian-800 dark:bg-obsidian-900/50">
-              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">How to plug it in</p>
-              <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                <div className="rounded-md bg-amber-100 px-2 py-1.5 text-xs dark:bg-amber-950/70">
-                  <span className="font-semibold text-amber-900 dark:text-amber-200">ether1</span>
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">4. What is each port for?</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {hasPppoe
+                  ? "Choose PPPoE for every port with a cable to your PPPoE customers (you can pick several)."
+                  : "Every port runs the hotspot. Change one to Office for your own PC or CCTV."}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-amber-300 bg-amber-100 px-2.5 py-2 text-xs dark:border-amber-800 dark:bg-amber-950/70">
+                  <span className="block font-semibold text-amber-900 dark:text-amber-200">ether1</span>
                   <span className="block text-amber-800 dark:text-amber-300">Internet in (from your modem)</span>
                 </div>
-                {LAN_PORTS.map((p) => {
-                  const role = portRole(p);
-                  return (
-                    <div key={p} className={`rounded-md px-2 py-1.5 text-xs ${role.tone}`}>
-                      <span className="font-semibold">{p}</span>
-                      <span className="block opacity-90">{role.label}</span>
-                    </div>
-                  );
-                })}
-                {hasHotspot && (
-                  <div className="rounded-md bg-blue-600 px-2 py-1.5 text-xs text-white">
-                    <span className="font-semibold">Wi-Fi</span>
-                    <span className="block opacity-90">Hotspot</span>
-                  </div>
-                )}
+                {ports.map((p) => (
+                  <label key={p} className={`rounded-lg border px-2.5 py-2 text-xs ${ROLE_TONE[roleOf(p)]}`}>
+                    <span className="block font-semibold">{p}</span>
+                    <select
+                      aria-label={`What ${p} is for`}
+                      value={roleOf(p)}
+                      onChange={(e) => setRole(p, e.target.value as PortRole)}
+                      className="mt-1 w-full rounded-md border border-white/40 bg-white/15 px-1.5 py-1 text-xs font-medium text-white outline-none [&>option]:text-slate-900"
+                    >
+                      {roleChoices.map((r) => (
+                        <option key={r} value={r}>
+                          {ROLE_LABEL[r]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+                <div className={`rounded-lg border px-2.5 py-2 text-xs ${ROLE_TONE.hotspot}`}>
+                  <span className="block font-semibold">Wi-Fi</span>
+                  <span className="block opacity-90">Hotspot</span>
+                </div>
               </div>
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                Using a VLAN switch? Add the router like this first, then create each VLAN on the{" "}
+                <Link href="/vlans" className="font-medium text-brand-600 underline dark:text-brand-400">
+                  VLANs page
+                </Link>
+                : every VLAN becomes its own hotspot or PPPoE network on the port your switch is in.
+              </p>
             </div>
 
             <details className="mt-4 rounded-xl border border-slate-200 p-3.5 dark:border-obsidian-800">
@@ -349,21 +392,6 @@ export default function LinkRouterWizardPage() {
                     ))}
                   </div>
                   <HintText>Leave on &ldquo;Detect automatically&rdquo; unless you know it.</HintText>
-                </div>
-
-                <div>
-                  <Label>Office port (internet with no sign-in)</Label>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    <Chip selected={lanPort === "none"} onClick={() => setLanPort("none")}>
-                      None
-                    </Chip>
-                    {LAN_PORTS.filter((p) => !(hasPppoe && p === pppoePort)).map((p) => (
-                      <Chip key={p} selected={lanPort === p} onClick={() => setLanPort(p)}>
-                        {p}
-                      </Chip>
-                    ))}
-                  </div>
-                  <HintText>For your own PC, CCTV or a technician laptop. Devices there get internet without the sign-in page.</HintText>
                 </div>
 
                 {hasHotspot && (
@@ -402,8 +430,9 @@ export default function LinkRouterWizardPage() {
             </details>
 
             {error && <ErrorText>{error}</ErrorText>}
+            {hasPppoe && pppoePorts.length === 0 && <ErrorText>Set at least one port to &ldquo;PPPoE customers&rdquo;.</ErrorText>}
             <div className="mt-5 flex justify-end">
-              <Button type="submit" disabled={createPending.isPending || !name.trim()} className="gap-1.5">
+              <Button type="submit" disabled={createPending.isPending || !name.trim() || (hasPppoe && pppoePorts.length === 0)} className="gap-1.5">
                 {createPending.isPending ? "Adding…" : "Next: get the command"} <IconChevronRight size={14} />
               </Button>
             </div>
