@@ -438,6 +438,7 @@ ${cleanupExcludedPorts ? `${cleanupExcludedPorts}\n` : ""}${bridgePortLines}
 :do {/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1} on-error={}
 :do {/ip dns set allow-remote-requests=yes} on-error={}
 :do {/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="MASHUPKGRID"} on-error={}
+${PRIVATE_LIST_LINES.map((l) => `:do {${l}} on-error={}`).join("\n")}
 :do {/ip firewall nat remove [find comment="${LAN_NAT_COMMENT}"]} on-error={}
 :do {${LAN_NAT_RULE}} on-error={}
 ${directLanSection ? `${directLanSection}\n` : ""}
@@ -526,12 +527,26 @@ function heartbeatOnEvent(callbackUrl: string): string {
   );
 }
 
-/** Shares the internet with the hotspot's customers whichever port it arrives on. The ether1
- *  masquerade assumes the internet is on ether1; on a router fed through ether2, an LTE modem or a
- *  PPPoE link, the router itself was online but signed-in phones got "You're online" and nothing
- *  loaded. This one matches the customers' own subnet leaving by any port but the LAN bridge. */
+/** Shares the internet with every customer, whichever port the internet arrives on: hotspot
+ *  (192.168.88.0/24), PPPoE (its pool) and every VLAN's subnet alike. The ether1 masquerade
+ *  assumes the internet is on ether1; on a router fed through ether2, an LTE modem or a PPPoE
+ *  uplink, the router itself was online but customers got "You're online" and nothing loaded.
+ *
+ *  One rule: traffic from any private address to any public one is masqueraded. Traffic between
+ *  the router's own networks (and over the management VPN) stays private and is never touched,
+ *  and a new VLAN or PPPoE range needs nothing of its own. */
 export const LAN_NAT_COMMENT = "MASHUPKGRID LAN NAT";
-const LAN_NAT_RULE = `/ip firewall nat add chain=srcnat src-address=192.168.88.0/24 out-interface=!bridge action=masquerade comment="${LAN_NAT_COMMENT}"`;
+const PRIVATE_LIST = "mkg-private";
+const PRIVATE_RANGES = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
+const LAN_NAT_RULE = `/ip firewall nat add chain=srcnat src-address-list=${PRIVATE_LIST} dst-address-list=!${PRIVATE_LIST} action=masquerade comment="${LAN_NAT_COMMENT}"`;
+const PRIVATE_LIST_LINES = [
+  `/ip firewall address-list remove [find list=${PRIVATE_LIST}]`,
+  ...PRIVATE_RANGES.map((r) => `/ip firewall address-list add list=${PRIVATE_LIST} address=${r} comment="${LAN_NAT_COMMENT}"`),
+];
+/** Replaces the first version of the rule (hotspot subnet only) and fills the address list. */
+const LAN_NAT_REPAIR =
+  `:do {:if ([:len [/ip firewall address-list find list=${PRIVATE_LIST}]] != ${PRIVATE_RANGES.length}) do={${PRIVATE_LIST_LINES.join("; ")}}; ` +
+  `:if ([:len [/ip firewall nat find comment="${LAN_NAT_COMMENT}" src-address-list=${PRIVATE_LIST}]] != 1) do={/ip firewall nat remove [find comment="${LAN_NAT_COMMENT}"]; ${LAN_NAT_RULE}}} on-error={}`;
 
 const UNPAID_REPAIR =
   `:do {:foreach w in=[/ip hotspot walled-garden ip find comment="MASHUPKGRID"] do={:if ([:len [/ip hotspot walled-garden ip get $w dst-port]] = 0) do={/ip hotspot walled-garden ip set $w ${WEB_ONLY}}}} on-error={}\n` +
@@ -593,7 +608,8 @@ export function buildHeartbeatScript(
     // the sign-in page). Exactly one pair of rules: any other count — none, or the duplicates an
     // earlier version added every minute — is cleared and replaced.
     `:do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]; /ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"; /ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"}} on-error={}`,
-    `:do {:if ([:len [/ip firewall nat find comment="${LAN_NAT_COMMENT}"]] = 0) do={${LAN_NAT_RULE}}} on-error={}`,
+    // RouterOS 6 gets it from its setup script: its report must stay under 4 KB.
+    ...(options.hotspotCheck === false ? [] : [LAN_NAT_REPAIR]),
     `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
     // The sign-in page, in the folder each hotspot really uses (see portalRepair).
     // Unpaid devices: walled-garden addresses for web pages only, and no DNS tunnels (see WEB_ONLY
