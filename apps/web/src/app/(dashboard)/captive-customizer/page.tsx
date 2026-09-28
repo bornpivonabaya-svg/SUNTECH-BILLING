@@ -20,6 +20,7 @@ import { MascotRenderer } from "@/components/hotspot/plugins/MascotGallery";
 import { portalSoundEngine } from "@/lib/captive-portal-plugins/sound-effects";
 import { useAuth } from "@/lib/auth-context";
 import { apiFetch } from "@/lib/api-client";
+import { usePortalBase } from "@/lib/portal-url";
 
 type TabId =
   | "appearance"
@@ -34,7 +35,8 @@ type TabId =
 
 export default function CaptiveCustomizerPage() {
   const { user } = useAuth();
-  const tenantSlug = user?.tenantSlug || "mash";
+  const tenantSlug = user?.tenantSlug ?? "";
+  const portalBase = usePortalBase();
 
   // Lazy local default only — a real starting point before the server fetch below resolves,
   // never the value this page trusts once loaded. See the effect for why.
@@ -59,7 +61,7 @@ export default function CaptiveCustomizerPage() {
   const [welcomeTitle, setWelcomeTitle] = useState("FAST & SECURE WI-FI");
   const [bannerSubtitle, setBannerSubtitle] = useState("HIGH SPEED FIBER CONNECTION");
   const [activeThemeId, setActiveThemeId] = useState("suntech-blue");
-  const [installationFee, setInstallationFee] = useState("1,500/-");
+  const [installationFee, setInstallationFee] = useState("");
 
   useEffect(() => {
     // The authoritative load. Previously this read localStorage only, so opening the editor on a
@@ -68,6 +70,7 @@ export default function CaptiveCustomizerPage() {
     // that state would have overwritten real configuration with defaults. Now it loads the
     // published state from the server; the local cache is only what a same-tab live preview uses
     // between saves.
+    if (!tenantSlug) return; // not signed in as an ISP yet
     void fetchPublishedPluginsState(tenantSlug, apiFetch).then(setState);
 
     // Fetch live backend settings for this specific tenant
@@ -93,6 +96,7 @@ export default function CaptiveCustomizerPage() {
    *  Reset, which are the same operation — "make this the state real customers see" — just with
    *  a different starting value. */
   const persistPluginsToServer = async (next: CaptivePortalPluginsState): Promise<boolean> => {
+    if (!tenantSlug) return false;
     const payload = {
       phone: contactPhone.trim(),
       supportPhone: supportPhone.trim(),
@@ -224,7 +228,7 @@ export default function CaptiveCustomizerPage() {
             Reset Defaults
           </button>
           <a
-            href={typeof window !== "undefined" && !window.location.hostname.includes("localhost") ? `https://captive.mashuphost.tech/hotspot/${tenantSlug}` : `/hotspot/${tenantSlug}`}
+            href={`${portalBase}/hotspot/${tenantSlug}`}
             target="_blank"
             rel="noopener noreferrer"
             className="px-3.5 py-2 rounded-xl bg-indigo-950 border border-indigo-500/40 hover:bg-indigo-900 text-indigo-200 text-xs font-bold transition-all flex items-center gap-1.5"

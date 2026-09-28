@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { LandingClient } from "./landing-client";
+import { LandingClient, type PublicPlan } from "./landing-client";
 import { DEFAULT_LANDING_CONTENT, type LandingContent } from "@/lib/landing-content";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { DEFAULT_LANDING_SECTIONS, type LandingSections } from "@/lib/landing-sections";
@@ -134,8 +134,23 @@ async function loadHomepage(): Promise<{ content: LandingContent; sections: Land
   };
 }
 
+/** The platform's real plans (the ones ISPs subscribe to), for the pricing section. Empty when the
+ *  API can't be reached: the page then shows no prices rather than made-up ones. */
+async function loadPlans(): Promise<PublicPlan[]> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiUrl) return [];
+  try {
+    const response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/public/plans`, { next: { revalidate: 60 } });
+    if (!response.ok) return [];
+    const body = (await response.json()) as { data?: PublicPlan[] };
+    return Array.isArray(body?.data) ? body.data : [];
+  } catch {
+    return [];
+  }
+}
+
 export default async function Page() {
-  const { content: landingContent, sections } = await loadHomepage();
+  const [{ content: landingContent, sections }, plans] = await Promise.all([loadHomepage(), loadPlans()]);
 
   /**
    * FAQ rich-result markup, built from the FAQs actually rendered on the page — never a separate
@@ -170,7 +185,7 @@ export default async function Page() {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
         />
       )}
-      <LandingClient initialContent={landingContent} sections={sections} />
+      <LandingClient initialContent={landingContent} sections={sections} plans={plans} />
     </>
   );
 }
