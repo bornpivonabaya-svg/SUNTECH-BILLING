@@ -64,6 +64,7 @@ import { requireFeature } from "../plugins/require-feature.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { assertWithinPlanLimit } from "../lib/plan-limits.js";
 import { winboxRelayHost } from "../lib/winbox-relay-host.js";
+import { portalPageSizes } from "../lib/router-pages.js";
 
 const preHandler = [authenticate, resolveTenant, checkMaintenance] as const;
 
@@ -463,6 +464,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         hotspotPorts: router.hotspotPorts,
         lanPort: router.lanPort,
         routerOsMajor: router.routerOsMajor,
+        appFilter: await tenantSellsAppPackages(tenantId),
       });
 
       await writeAuditLog({
@@ -1053,6 +1055,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       hotspotPorts: router.hotspotPorts,
       lanPort: router.lanPort,
       routerOsMajor: router.routerOsMajor,
+      appFilter: await tenantSellsAppPackages(router.tenantId),
     });
 
     reply.header("Content-Type", "text/plain; charset=utf-8").send(script);
@@ -1080,7 +1083,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     }
     const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${token}/callback`;
     // The ISP's own sign-in page, which the report puts back if the router ever loses it.
-    const tenantSlug = (await prisma.tenant.findUnique({ where: { id: router.tenantId }, select: { slug: true } }))?.slug;
+    const tenant = await prisma.tenant.findUnique({ where: { id: router.tenantId }, select: { slug: true, name: true } });
+    const tenantSlug = tenant?.slug;
     const loginTemplateUrl = tenantSlug
       ? `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
       : undefined;
@@ -1093,6 +1097,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
         // Every 5 minutes on a small router (hAP lite and the like), every minute otherwise.
         checkInEvery: heartbeatIntervalRouterOs(router),
         vpn: isV6 ? null : await routerVpnSettings(router),
+        // The router compares its pages with these sizes: no need to read the files.
+        pageSizes: tenant ? portalPageSizes(tenant.slug, tenant.name) : undefined,
       })
     );
   });
@@ -1194,4 +1200,16 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       throw err;
     }
   });
+}
+
+/** Whether this ISP sells per-app packages (TikTok only, …). Only then does setup install the app
+ *  filter, which routes every customer's DNS through the router: a small router (hAP lite) is
+ *  spared that load when nobody needs it. */
+async function tenantSellsAppPackages(tenantId: string): Promise<boolean> {
+  const where = { tenantId, appPolicy: { notIn: ["ALL", ""] } };
+  const [packages, vouchers] = await Promise.all([
+    prisma.hotspotPackage.count({ where: { ...where, isActive: true } }),
+    prisma.hotspotVoucher.count({ where }),
+  ]);
+  return packages + vouchers > 0;
 }

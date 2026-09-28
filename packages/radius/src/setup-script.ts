@@ -277,6 +277,10 @@ export function buildMikrotikProvisioningScript(
     serverPort?: number;
     vpnIp?: string;
     loginTemplateUrl?: string;
+    /** Install the per-app package filter (see app-filter.ts). Only ISPs that sell per-app
+     *  packages need it; it sends every customer's DNS through the router, so small routers are
+     *  spared it otherwise. Omitted: installed, as before. */
+    appFilter?: boolean;
     hotspotInterface?: string;
     /** Existing IP pool the hotspot hands addresses from — deliberately reusing the interface's
      *  current DHCP pool rather than creating a second one on the same subnet. */
@@ -371,7 +375,10 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
   const apiHost = hostFromUrl(loginTemplateUrl);
   const portalHost = options.portalHost ? hostFromUrl(options.portalHost) : "captive.mashuphost.tech";
   // App-only customers must still reach the portal (to buy full internet) and the API behind it.
-  const appFilterSection = buildAppFilterSection({ portalHosts: [...new Set([portalHost, apiHost])] });
+  const appFilterSection =
+    options.appFilter === false
+      ? "# Not installed: this ISP sells no per-app packages."
+      : buildAppFilterSection({ portalHosts: [...new Set([portalHost, apiHost])] });
   // Order matters only for readability of the generated script; walledGardenLines de-dupes.
   // The tenant's own domains come before the gateways so an operator reading the script sees
   // "my portal is reachable" first — that is the entry they most often need to check.
@@ -480,7 +487,7 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 # (findMacLogin) when it reconnects, without seeing the sign-in page at all.
 :do {/ip hotspot profile set [find] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
 :do {/ip hotspot set [find interface=bridge] profile=default disabled=no} on-error={}
-:do {/ip hotspot reset-html} on-error={}
+${deferred(`:if ([:len [/file find name="hotspot/login.html"]] = 0) do={/ip hotspot reset-html}`)}
 :do {/ip hotspot user profile set [find default=yes] shared-users=1} on-error={}
 :do {/ip hotspot remove [find name=mkg-hotspot]} on-error={}
 :do {/ip hotspot add name=mkg-hotspot interface=bridge address-pool=default-dhcp profile=default disabled=no} on-error={}
@@ -494,10 +501,9 @@ ${UNPAID_DNS_RULES.map((rule) => `:do {${rule}} on-error={}`).join("\n")}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}
 
-# Self-repair for the branded login page: if hotspot/login.html is ever missing (a setup cut short,
-# a reset of the hotspot folder), customers get MikroTik's stock sign-in page instead of the portal.
+# The sign-in page is checked on every report (see portalRepair in buildHeartbeatScript); the
+# separate scheduler earlier versions added is removed, to keep small routers light.
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
-:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0 && [:len [/file find name=\\"flash/hotspot/login.html\\"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
 # Persistent check-in, once a minute. It fetches the platform's small report script into memory
 # (never onto flash) and runs it: CPU, memory, disk, temperature, uptime, users — see
@@ -661,7 +667,14 @@ export function buildHeartbeatScript(
   /** walledGarden: this ISP's hotspotWalledGardenHosts, kept in sync on RouterOS 7 routers.
    *  checkInEvery: how often this router should report ("5m" on a small router, see
    *  heartbeat-interval.ts in @mashupkgrid/network); the router's scheduler is set to it. */
-  options: { hotspotCheck?: boolean; walledGarden?: readonly string[]; checkInEvery?: "1m" | "5m" | null; vpn?: VpnPeerSettings | null } = {}
+  options: {
+    hotspotCheck?: boolean;
+    walledGarden?: readonly string[];
+    checkInEvery?: "1m" | "5m" | null;
+    vpn?: VpnPeerSettings | null;
+    /** Exact byte sizes of this ISP's sign-in and "you're online" pages, as the API serves them. */
+    pageSizes?: { login?: number | null; alogin?: number | null };
+  } = {}
 ): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
@@ -698,7 +711,7 @@ export function buildHeartbeatScript(
     ...(options.hotspotCheck === false ? [] : [UNPAID_REPAIR, walledGardenSync(options.walledGarden ?? [])].filter(Boolean)),
     // RouterOS 6 leaves out the "you're online" refresh, like the hotspot check: its report must
     // stay under 4 KB.
-    portalRepair(loginTemplateUrl, aloginTemplateUrl, options.hotspotCheck !== false),
+    portalRepair(loginTemplateUrl, aloginTemplateUrl, options.hotspotCheck !== false, options.pageSizes),
     // cpu-load is the last second's load, and this runs straight after the router fetched it over
     // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
     `:delay 3s`,
@@ -737,31 +750,37 @@ export const ALOGIN_PAGE_MARKER = "mkg-alogin-2";
 /**
  * Makes sure every hotspot can show the sign-in page. For each hotspot profile it reads the
  * folder that profile really serves pages from (html-directory — "hotspot" or "flash/hotspot"
- * depending on the board), and if that folder's login.html is missing, cut short (under 200
- * bytes) or not the platform's (no "mkg-portal" marker — MikroTik's stock page, which can't take
- * payments) it rebuilds the hotspot's default pages there (reset-html, for that exact hotspot) and
- * downloads the ISP's sign-in and "you're online" pages into the same folder. An outdated "you're
- * online" page (no ALOGIN_PAGE_MARKER) is downloaded again on its own. A router with the
- * page missing answers every phone with "Error 404 : Not Found", which Android shows as
- * "Connected, no internet". Nothing is written when the page is fine. reset-html goes through
- * :parse, so a version that words it differently fails that command alone, not the report.
+ * depending on the board) and compares that folder's login.html with the page the platform
+ * serves by size alone: the platform knows the exact byte count of this ISP's page (loginSize),
+ * so a missing, cut-short or stock MikroTik page is spotted without reading the file (reading
+ * contents is unreliable on RouterOS 7 and slow on a hAP lite). When it differs, the ISP's page is
+ * downloaded over it; the stock pages are never restored first, so a download that fails leaves
+ * whatever page was there — earlier versions reset the folder first, and a failed download then
+ * left MikroTik's stock sign-in page until the next try. reset-html runs only when the folder
+ * itself is missing (the hotspot needs its other files). The "you're online" page (alogin.html) is
+ * checked the same way. Nothing is written when the pages are right. Without sizes (an older
+ * caller) a page of 200 bytes or more counts as fine.
  */
-function portalRepair(loginUrl: string | undefined, aloginUrl: string | null, refreshAlogin = true): string {
-  const fetches = loginUrl
-    ? `:do {/tool fetch url="${loginUrl}" dst-path=($dir . "/login.html") check-certificate=no} on-error={}; ` +
-      (aloginUrl ? `:do {/tool fetch url="${aloginUrl}" dst-path=($dir . "/alogin.html") check-certificate=no} on-error={}; ` : "")
-    : "";
+function portalRepair(
+  loginUrl: string | undefined,
+  aloginUrl: string | null,
+  refreshAlogin = true,
+  sizes: { login?: number | null; alogin?: number | null } = {}
+): string {
+  const sizeOk = (v: string, expected: number | null | undefined) =>
+    expected ? `[:tonum [/file get ($${v}->0) size]] = ${expected}` : `[:tonum [/file get ($${v}->0) size]] >= 200`;
+  const fetchTo = (url: string, file: string) =>
+    `:do {/tool fetch url="${url}" dst-path=($dir . "/${file}") check-certificate=no} on-error={}; `;
   return (
     `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; ` +
     `:if ([:len $dir] = 0) do={:set dir "hotspot"; /ip hotspot profile set $p html-directory=hotspot}; ` +
+    `:if ([:len [/file find name=$dir]] = 0) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}}; ` +
     `:local ok false; :local f [/file find name=($dir . "/login.html")]; ` +
-    (loginUrl
-      ? `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:if ([:typeof [:find [/file get ($f->0) contents] "mkg-portal"]] = "num") do={:set ok true}}}; `
-      : `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:set ok true}}; `) +
-    `:if ($ok = false) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}; ${fetches}}; ` +
+    `:if ([:len $f] > 0) do={:if (${sizeOk("f", sizes.login)}) do={:set ok true}}; ` +
+    (loginUrl ? `:if ($ok = false) do={${fetchTo(loginUrl, "login.html")}${aloginUrl ? fetchTo(aloginUrl, "alogin.html") : ""}}; ` : "") +
     (aloginUrl && refreshAlogin
-      ? `:local a [/file find name=($dir . "/alogin.html")]; :local aok false; :if ([:len $a] > 0) do={:if ([:typeof [:find [/file get ($a->0) contents] "${ALOGIN_PAGE_MARKER}"]] = "num") do={:set aok true}}; ` +
-        `:if ($aok = false) do={:do {/tool fetch url="${aloginUrl}" dst-path=($dir . "/alogin.html") check-certificate=no} on-error={}}; `
+      ? `:local a [/file find name=($dir . "/alogin.html")]; :local aok false; :if ([:len $a] > 0) do={:if (${sizeOk("a", sizes.alogin)}) do={:set aok true}}; ` +
+        `:if ($aok = false) do={${fetchTo(aloginUrl, "alogin.html")}}; `
       : "") +
     `:if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`
   );
