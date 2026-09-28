@@ -541,11 +541,28 @@ export function heartbeatScriptUrl(callbackUrl: string): string {
 /** The mkg-heartbeat scheduler's script, escaped to sit inside on-event="…" of the setup script. */
 function heartbeatOnEvent(callbackUrl: string): string {
   const plain = `/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no`;
+  // Skipped while the previous run's download is still going (see HEARTBEAT_LOCK_OPEN).
   return (
+    `:global mkgHbFetch; :local up [/system resource get uptime]; :local run true; ` +
+    `:if ([:typeof \\$mkgHbFetch] = \\"time\\") do={:if (\\$up > \\$mkgHbFetch) do={:if ((\\$up - \\$mkgHbFetch) < 00:05:00) do={:set run false}}}; ` +
+    `:if (\\$run) do={:set mkgHbFetch \\$up; ` +
     `:do {:local r [/tool fetch url=\\"${heartbeatScriptUrl(callbackUrl)}\\" output=user as-value]; ` +
-    `:local f [:parse (\\$r->\\"data\\")]; \\$f} on-error={:do {${plain}} on-error={}}`
+    `:set mkgHbFetch \\"\\"; :local f [:parse (\\$r->\\"data\\")]; \\$f} on-error={:set mkgHbFetch \\"\\"; :do {${plain}} on-error={}}}`
   );
 }
+
+/**
+ * The report runs only when no other report is still running on the router, or the last one
+ * started over 5 minutes ago (stuck: its connection will time out on its own). RouterOS starts a
+ * scheduled script every interval whether or not the last one finished, and each stuck fetch
+ * holds memory: a few in a row froze a hAP lite (console not responding, no check-ins).
+ */
+const HEARTBEAT_LOCK_OPEN =
+  `:global mkgHbBusy; :local mkgUp [/system resource get uptime]; :local mkgRun true; ` +
+  // Nested, not one condition with &&: comparing the uptime with a cleared ("") lock would error.
+  `:if ([:typeof $mkgHbBusy] = "time") do={:if ($mkgUp > $mkgHbBusy) do={:if (($mkgUp - $mkgHbBusy) < 00:05:00) do={:set mkgRun false}}}; ` +
+  `:if ($mkgRun) do={:set mkgHbBusy $mkgUp`;
+const HEARTBEAT_LOCK_CLOSE = `:set mkgHbBusy ""}`;
 
 /** Shares the internet with every customer, whichever port the internet arrives on: hotspot
  *  (192.168.88.0/24), PPPoE (its pool) and every VLAN's subnet alike. The ether1 masquerade
@@ -615,6 +632,9 @@ export function buildHeartbeatScript(
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
   return [
     `{`,
+    // One report at a time: a report stuck on a slow or broken connection must not be joined by a
+    // new one every minute until a small router (hAP lite, 32 MB) runs out of memory.
+    HEARTBEAT_LOCK_OPEN,
     // Self-repair, each change made only when something is actually wrong, so a healthy router
     // writes nothing every minute. Radio commands go through deferred(): a router without that
     // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
@@ -649,7 +669,8 @@ export function buildHeartbeatScript(
     // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
     `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
     ...(options.hotspotCheck === false ? [] : [HOTSPOT_CHECK]),
-    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
+    `:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no} on-error={}`,
+    HEARTBEAT_LOCK_CLOSE,
     `}`,
     "",
   ].join("\n");

@@ -334,8 +334,24 @@ describe("router health report", () => {
     const reportUrl = callbackUrl.replace(/\/callback$/, "/heartbeat.rsc");
     expect(line).toContain(`/tool fetch url=\\"${reportUrl}\\" output=user as-value`);
     expect(line).toContain(':local f [:parse (\\$r->\\"data\\")]; \\$f}');
-    expect(line).toContain(`on-error={:do {/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no} on-error={}}`);
+    expect(line).toContain(`on-error={:set mkgHbFetch \\"\\"; :do {/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no} on-error={}}`);
+    // Skipped while the previous download is still going (for up to 5 minutes), so stuck
+    // downloads can't pile up every minute on a small router.
+    expect(line).toContain(':global mkgHbFetch; :local up [/system resource get uptime]; :local run true; :if ([:typeof \\$mkgHbFetch] = \\"time\\") do={:if (\\$up > \\$mkgHbFetch) do={:if ((\\$up - \\$mkgHbFetch) < 00:05:00) do={:set run false}}}; :if (\\$run) do={:set mkgHbFetch \\$up; ');
     expect(line).not.toContain("dst-path"); // nothing written to flash every minute
+  });
+
+  it("runs one report at a time, on RouterOS 6 and 7", () => {
+    for (const report of [buildHeartbeatScript(callbackUrl), buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })]) {
+      const lines = report.trimEnd().split("\n");
+      expect(lines[1]).toBe(
+        ':global mkgHbBusy; :local mkgUp [/system resource get uptime]; :local mkgRun true; :if ([:typeof $mkgHbBusy] = "time") do={:if ($mkgUp > $mkgHbBusy) do={:if (($mkgUp - $mkgHbBusy) < 00:05:00) do={:set mkgRun false}}}; :if ($mkgRun) do={:set mkgHbBusy $mkgUp'
+      );
+      // The check-in itself can't leave the lock set by failing: its error is caught, then the lock clears.
+      expect(lines.at(-3)).toMatch(/^:do \{\/tool fetch url=".*" http-method=post http-data=\$d keep-result=no\} on-error=\{\}$/);
+      expect(lines.at(-2)).toBe(':set mkgHbBusy ""}');
+      expect(lines.at(-1)).toBe("}");
+    }
   });
 
   it("reports CPU, memory, storage, uptime, version, board, users and sensors, and fits a v6 fetch", () => {
