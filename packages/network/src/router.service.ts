@@ -18,7 +18,7 @@ import { ensureWinboxRelayPort } from "./winbox-relay.service.js";
 import { APP_FILTER_RULE_COUNT, APP_FILTER_TAG } from "./app-filter.js";
 import { rememberActiveDevices } from "./hotspot-device.service.js";
 import { listWalledGardenHostsFor } from "./walled-garden.js";
-import type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
+import { withRadiusTrend, type HotspotCheck, type RouterHeartbeatMetrics } from "./heartbeat-report.js";
 
 export type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
 
@@ -344,6 +344,10 @@ export async function completeRouterProvisioning(
     provisionedAt: router.provisionedAt ?? new Date(),
   };
 
+  // RADIUS "timing out right now" needs the previous minute's counters (see withRadiusTrend).
+  if (metrics?.hotspotCheck) {
+    metrics = { ...metrics, hotspotCheck: withRadiusTrend(metrics.hotspotCheck, router.hotspotCheck as HotspotCheck | null) };
+  }
   // Everything the router reported about itself; a field it didn't send keeps its last value.
   for (const [key, value] of Object.entries(metrics ?? {})) {
     if (value !== undefined) updateData[key] = value;
