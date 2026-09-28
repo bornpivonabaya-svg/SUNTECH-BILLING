@@ -246,9 +246,60 @@ async function syncRadiusNasRegistration(router: Router, sourceAddress: string):
  *  still runs with until a freshly issued setup command has been run (see issueSetupCommand). */
 export async function findRouterByProvisionToken(provisionToken: string): Promise<Router | null> {
   const hash = hashToken(provisionToken);
-  return prisma.router.findFirst({
+  const router = await prisma.router.findFirst({
     where: { deletedAt: null, OR: [{ provisionTokenHash: hash }, { previousProvisionTokenHash: hash }] },
   });
+  return router ?? adoptReaddedRouter(hash);
+}
+
+/**
+ * A router removed from the dashboard and added again is still the same box: it keeps checking in
+ * with the token of the removed record, and its RADIUS secret and management account are that
+ * record's credentials. Without this, removing and re-adding left it refused as an unknown router —
+ * Offline, never repaired, and every customer login failing on a secret the new record didn't have.
+ *
+ * So a token of a removed router is handed to the one live router of the same ISP added after the
+ * removal under the same name or address that has not checked in yet: it takes over the token and
+ * the credentials the box really has, and the WireGuard peer. Anything less certain (none, or two
+ * candidates) adopts nothing, and the ISP runs the new setup command as before.
+ */
+async function adoptReaddedRouter(hash: string): Promise<Router | null> {
+  const removed = await prisma.router.findFirst({
+    where: { deletedAt: { not: null }, OR: [{ provisionTokenHash: hash }, { previousProvisionTokenHash: hash }] },
+    orderBy: { deletedAt: "desc" },
+  });
+  if (!removed?.deletedAt) return null;
+  const sameBox = [{ name: removed.name }, ...(removed.host ? [{ host: removed.host }] : [])];
+  const candidates = await prisma.router.findMany({
+    where: { tenantId: removed.tenantId, deletedAt: null, provisionedAt: null, createdAt: { gt: removed.deletedAt }, OR: sameBox },
+  });
+  if (candidates.length !== 1) return null;
+  const target = candidates[0]!;
+
+  const [, adopted] = await prisma.$transaction([
+    // The hashes are unique: the removed record gives them up first.
+    prisma.router.update({ where: { id: removed.id }, data: { provisionTokenHash: null, previousProvisionTokenHash: null } }),
+    prisma.router.update({
+      where: { id: target.id },
+      data: {
+        ...(target.provisionTokenHash ? { previousProvisionTokenHash: hash } : { provisionTokenHash: hash }),
+        usernameEncrypted: removed.usernameEncrypted,
+        passwordEncrypted: removed.passwordEncrypted,
+        ...(removed.vpnPublicKey && !target.vpnPublicKey
+          ? { vpnPublicKey: removed.vpnPublicKey, vpnIp: removed.vpnIp, vpnConfiguredAt: removed.vpnConfiguredAt }
+          : {}),
+      },
+    }),
+  ]);
+  if (adopted.vpnPublicKey && adopted.vpnIp && adopted.vpnPublicKey === removed.vpnPublicKey) {
+    try {
+      await registerWireguardPeer(env.WIREGUARD_INTERFACE, adopted.vpnPublicKey, adopted.vpnIp);
+    } catch (err) {
+      console.warn("WireGuard peer registration warning on re-added router:", err);
+    }
+  }
+  console.log(`[routers] "${adopted.name}" was removed and added again: the router's check-in now reaches the new record`);
+  return adopted;
 }
 
 /**
