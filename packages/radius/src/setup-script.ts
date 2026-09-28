@@ -417,6 +417,8 @@ ${cleanupExcludedPorts ? `${cleanupExcludedPorts}\n` : ""}${bridgePortLines}
 :do {/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1} on-error={}
 :do {/ip dns set allow-remote-requests=yes} on-error={}
 :do {/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="MASHUPKGRID"} on-error={}
+:do {/ip firewall nat remove [find comment="${LAN_NAT_COMMENT}"]} on-error={}
+:do {${LAN_NAT_RULE}} on-error={}
 ${directLanSection ? `${directLanSection}\n` : ""}
 
 # Management API and account.
@@ -501,6 +503,13 @@ function heartbeatOnEvent(callbackUrl: string): string {
   );
 }
 
+/** Shares the internet with the hotspot's customers whichever port it arrives on. The ether1
+ *  masquerade assumes the internet is on ether1; on a router fed through ether2, an LTE modem or a
+ *  PPPoE link, the router itself was online but signed-in phones got "You're online" and nothing
+ *  loaded. This one matches the customers' own subnet leaving by any port but the LAN bridge. */
+export const LAN_NAT_COMMENT = "MASHUPKGRID LAN NAT";
+const LAN_NAT_RULE = `/ip firewall nat add chain=srcnat src-address=192.168.88.0/24 out-interface=!bridge action=masquerade comment="${LAN_NAT_COMMENT}"`;
+
 /**
  * What mkg-heartbeat runs each minute, served fresh by the platform (so it improves without anyone
  * re-running setup). Reads the router's own figures and posts them to the callback as a form
@@ -527,9 +536,12 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // the sign-in page). Exactly one pair of rules: any other count — none, or the duplicates an
     // earlier version added every minute — is cleared and replaced.
     `:do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]; /ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"; /ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"}} on-error={}`,
+    `:do {:if ([:len [/ip firewall nat find comment="${LAN_NAT_COMMENT}"]] = 0) do={${LAN_NAT_RULE}}} on-error={}`,
     `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
     // The sign-in page, in the folder each hotspot really uses (see portalRepair).
-    portalRepair(loginTemplateUrl, aloginTemplateUrl),
+    // RouterOS 6 leaves out the "you're online" refresh, like the hotspot check: its report must
+    // stay under 4 KB.
+    portalRepair(loginTemplateUrl, aloginTemplateUrl, options.hotspotCheck !== false),
     // cpu-load is the last second's load, and this runs straight after the router fetched it over
     // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
     `:delay 3s`,
@@ -574,7 +586,7 @@ export const ALOGIN_PAGE_MARKER = "mkg-alogin-2";
  * "Connected, no internet". Nothing is written when the page is fine. reset-html goes through
  * :parse, so a version that words it differently fails that command alone, not the report.
  */
-function portalRepair(loginUrl: string | undefined, aloginUrl: string | null): string {
+function portalRepair(loginUrl: string | undefined, aloginUrl: string | null, refreshAlogin = true): string {
   const fetches = loginUrl
     ? `:do {/tool fetch url="${loginUrl}" dst-path=($dir . "/login.html") check-certificate=no} on-error={}; ` +
       (aloginUrl ? `:do {/tool fetch url="${aloginUrl}" dst-path=($dir . "/alogin.html") check-certificate=no} on-error={}; ` : "")
@@ -587,7 +599,7 @@ function portalRepair(loginUrl: string | undefined, aloginUrl: string | null): s
       ? `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:if ([:typeof [:find [/file get ($f->0) contents] "mkg-portal"]] = "num") do={:set ok true}}}; `
       : `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:set ok true}}; `) +
     `:if ($ok = false) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}; ${fetches}}; ` +
-    (aloginUrl
+    (aloginUrl && refreshAlogin
       ? `:local a [/file find name=($dir . "/alogin.html")]; :local aok false; :if ([:len $a] > 0) do={:if ([:typeof [:find [/file get ($a->0) contents] "${ALOGIN_PAGE_MARKER}"]] = "num") do={:set aok true}}; ` +
         `:if ($aok = false) do={:do {/tool fetch url="${aloginUrl}" dst-path=($dir . "/alogin.html") check-certificate=no} on-error={}}; `
       : "") +
