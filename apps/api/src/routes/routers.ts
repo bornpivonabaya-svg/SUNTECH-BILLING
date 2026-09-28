@@ -52,6 +52,7 @@ import {
   buildSocialFirewallOnlyScript,
   hotspotWalledGardenHosts,
   type CardGateway,
+  type VpnPeerSettings,
 } from "@mashupkgrid/radius";
 import { successResponse, ConflictError, NotFoundError } from "@mashupkgrid/shared";
 import { env, isProduction } from "@mashupkgrid/config";
@@ -178,6 +179,46 @@ async function tenantWalledGarden(tenantId: string): Promise<string[]> {
     cardGateways,
     extraHosts,
   });
+}
+
+/** The platform's end of the management VPN: its public key (from the environment, else from
+ *  wg0 itself) and the host routers dial. */
+async function wireguardServer(): Promise<{ serverPublicKey: string; serverHost: string; serverPort: number }> {
+  let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
+  if (!serverPublicKey) {
+    try {
+      const { execFileSync } = await import("node:child_process");
+      serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], { encoding: "utf-8" }).trim();
+    } catch {
+      serverPublicKey = "";
+    }
+  }
+  const serverHost = env.WIREGUARD_SERVER_ENDPOINT
+    ? env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0]! : env.WIREGUARD_SERVER_ENDPOINT
+    : await platformPublicAddress();
+  return { serverPublicKey, serverHost, serverPort: env.WIREGUARD_LISTEN_PORT || 51820 };
+}
+
+/** Where operators point WinBox for the relay: WINBOX_RELAY_PUBLIC_HOST when set, else the API's
+ *  own name (api.mashuphost.tech — a DNS-only record straight to this server; the bare domain is
+ *  behind Cloudflare's proxy, which carries web traffic only), else the VPN endpoint. */
+function winboxRelayHost(fallback: string): string {
+  if (env.WINBOX_RELAY_PUBLIC_HOST) return env.WINBOX_RELAY_PUBLIC_HOST;
+  try {
+    const host = new URL(env.APP_API_PUBLIC_URL).hostname;
+    if (host && host !== "localhost") return host;
+  } catch {
+    // fall through
+  }
+  return (env.WIREGUARD_SERVER_ENDPOINT || fallback).split(":")[0] || fallback;
+}
+
+/** What a router needs to rebuild its end of the VPN, when the VPN is on and it has an address. */
+async function routerVpnSettings(router: RouterRow): Promise<VpnPeerSettings | null> {
+  if (!env.ENABLE_WIREGUARD_REMOTE_ACCESS || !router.vpnIp) return null;
+  const { serverPublicKey, serverHost, serverPort } = await wireguardServer();
+  if (!serverPublicKey || !serverHost) return null;
+  return { serverPublicKey, endpointHost: serverHost, endpointPort: serverPort, subnet: env.WIREGUARD_SUBNET_CIDR, vpnIp: router.vpnIp };
 }
 
 /** The address routers use to reach this API: ROUTER_API_BASE_URL when set (e.g. a LAN address
@@ -401,21 +442,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
       const managementSource = env.ROUTER_MANAGEMENT_SOURCE || (await platformPublicAddress());
       const vpnIp = await ensureRouterVpnIp(router.id);
 
-      let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
-      if (!serverPublicKey) {
-        try {
-          const { execFileSync } = await import("node:child_process");
-          serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], {
-            encoding: "utf-8",
-          }).trim();
-        } catch {
-          serverPublicKey = "";
-        }
-      }
-
-      const serverHost = env.WIREGUARD_SERVER_ENDPOINT
-        ? (env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0] : env.WIREGUARD_SERVER_ENDPOINT)
-        : await platformPublicAddress();
+      const { serverPublicKey, serverHost } = await wireguardServer();
 
       const credentials = await getGeneratedCredentials(tenantId, routerId);
       const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}/callback`;
@@ -679,7 +706,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         useTls: router.useTls,
       });
       const cloudHost = await platformPublicAddress();
-      const relayHost = env.WINBOX_RELAY_PUBLIC_HOST || (env.WIREGUARD_SERVER_ENDPOINT || cloudHost).split(":")[0] || null;
+      const relayHost = winboxRelayHost(cloudHost) || null;
       reply.send(
         successResponse(
           {
@@ -1073,6 +1100,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
         walledGarden: isV6 ? [] : await tenantWalledGarden(router.tenantId),
         // Every 5 minutes on a small router (hAP lite and the like), every minute otherwise.
         checkInEvery: heartbeatIntervalRouterOs(router),
+        vpn: isV6 ? null : await routerVpnSettings(router),
       })
     );
   });

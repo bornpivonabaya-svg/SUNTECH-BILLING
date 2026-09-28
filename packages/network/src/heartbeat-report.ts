@@ -23,6 +23,9 @@ export interface RouterHeartbeatMetrics {
   /** The management VPN as the router reports it; see parseVpnReport. */
   vpnStatus?: "none" | "no-peer" | "waiting" | "connected";
   vpnHandshakeAt?: Date;
+  /** The router's WireGuard public key (mkg-wg), so a lost or changed key is registered again.
+   *  Not stored as a figure: completeRouterProvisioning acts on it. */
+  wgPublicKey?: string;
   /** The router's hotspot self-check; see parseHotspotCheck and hotspotProblems. */
   hotspotCheck?: HotspotCheck;
   hotspotCheckAt?: Date;
@@ -136,6 +139,9 @@ export function parseVpnReport(value: string | null, now = Date.now()): Pick<Rou
   return { vpnStatus: ago <= 180 ? "connected" : "waiting", vpnHandshakeAt: new Date(now - ago * 1000) };
 }
 
+/** A WireGuard public key: 32 bytes of standard base64 (the last character carries 4 bits). */
+const WIREGUARD_KEY = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/;
+
 /** True when a callback body is this report rather than a WireGuard public key. */
 export function isHeartbeatReport(body: string): boolean {
   return /(^|&)cpu=/.test(body);
@@ -230,6 +236,9 @@ export function parseHeartbeatReport(body: string, query: Record<string, unknown
   }
 
   Object.assign(metrics, parseVpnReport(get("wg")));
+  // Sent raw in the form body, so base64's "+" arrives as a space.
+  const wgKey = get("wgkey")?.trim().replace(/ /g, "+");
+  if (wgKey && WIREGUARD_KEY.test(wgKey)) metrics.wgPublicKey = wgKey;
   const hotspotCheck = parseHotspotCheck(get("hs"));
   if (hotspotCheck) {
     metrics.hotspotCheck = hotspotCheck;

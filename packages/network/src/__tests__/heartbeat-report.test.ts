@@ -130,3 +130,15 @@ describe("RADIUS timing out right now, not since the router started", () => {
     expect(codes(withRadiusTrend({ rreq: 3, racc: 1, rrej: 0, rto: 2 }, null))).toEqual([]);
   });
 });
+
+describe("the router's WireGuard key in its report", () => {
+  it("reads it, turning the '+' the raw form body made a space back into '+'", () => {
+    const key = "aB+cDeFgHiJkLmNoPqRsTuVwXyZ0123456789/abcdE=";
+    const body = `cpu=3&wgkey=${key.replace(/\+/g, " ")}`;
+    expect(parseHeartbeatReport(body).wgPublicKey).toBe(key);
+  });
+  it("ignores anything that isn't a WireGuard key", () => {
+    expect(parseHeartbeatReport("cpu=3&wgkey=nope").wgPublicKey).toBeUndefined();
+    expect(parseHeartbeatReport("cpu=3&wgkey=").wgPublicKey).toBeUndefined();
+  });
+});

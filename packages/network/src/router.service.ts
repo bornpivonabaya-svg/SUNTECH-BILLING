@@ -332,7 +332,14 @@ export async function completeRouterProvisioning(
   const router = await findRouterByProvisionToken(provisionToken);
   if (!router) throw new NotFoundError("Provisioning token");
 
-  const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : "";
+  // The key the setup script sends once, or the one the router's report carries when it differs
+  // from what is registered (sending it once failed, or the router's key changed).
+  const reportedKey = metrics?.wgPublicKey && metrics.wgPublicKey !== router.vpnPublicKey ? metrics.wgPublicKey : "";
+  const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : reportedKey;
+  if (metrics?.wgPublicKey) {
+    const { wgPublicKey: _key, ...figures } = metrics;
+    metrics = figures;
+  }
 
   const updateData: Record<string, unknown> = {
     // The router checked in with its new token: the old one has done its job.

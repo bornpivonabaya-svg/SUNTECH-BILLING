@@ -340,14 +340,16 @@ export function buildMikrotikProvisioningScript(
   const wireguardSection = serverPublicKey && osMajor !== 6
     ? `
 # Optional management VPN (RouterOS v7+). This is deliberately last: a legacy or low-resource
-# hAP must still finish hotspot provisioning even when WireGuard is unavailable.
+# hAP must still finish hotspot provisioning even when WireGuard is unavailable. Sending the key
+# is allowed to fail (a slow or refused request once left routers with no peer at all): the
+# router's check-in reports the key again and puts back a missing peer (vpnRepair).
 ${deferred(`/interface wireguard remove [find name=mkg-wg]
 /interface wireguard add name=mkg-wg listen-port=${serverPort}
 :delay 2s
 /ip address remove [find interface=mkg-wg]
 /ip address add address=${vpnIp}/32 interface=mkg-wg
 :local routerPublicKey [/interface wireguard get [find name=mkg-wg] public-key]
-/tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no
+:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no} on-error={}
 :delay 2s
 /interface wireguard peers remove [find interface=mkg-wg]
 /interface wireguard peers add interface=mkg-wg public-key="${serverPublicKey}" endpoint-address="${serverHost}" endpoint-port=${serverPort} allowed-address=${vpnSubnet} persistent-keepalive=25s`)}
@@ -619,6 +621,32 @@ export function walledGardenSync(hosts: readonly string[]): string {
   );
 }
 
+/** The platform's end of the management VPN, as a router needs it. */
+export interface VpnPeerSettings {
+  serverPublicKey: string;
+  endpointHost: string;
+  endpointPort: number;
+  subnet: string;
+  vpnIp: string;
+}
+
+/**
+ * Puts the router's management VPN back when any part of it is missing: the mkg-wg interface,
+ * its address, or the peer for this server (a router set up once with its peer step cut short
+ * reported "no peer" forever, and remote WinBox could never reach it). Each part is touched only
+ * when missing or wrong. RouterOS 7 only; through :parse, since v6 has no WireGuard menu.
+ */
+export function vpnRepair(vpn: VpnPeerSettings): string {
+  const peer = `public-key="${vpn.serverPublicKey}"`;
+  return deferred(
+    [
+      `:if ([:len [/interface wireguard find name=mkg-wg]] = 0) do={/interface wireguard add name=mkg-wg listen-port=${vpn.endpointPort}}`,
+      `:if ([:len [/ip address find interface=mkg-wg address="${vpn.vpnIp}/32"]] = 0) do={/ip address remove [find interface=mkg-wg]; /ip address add address=${vpn.vpnIp}/32 interface=mkg-wg}`,
+      `:if ([:len [/interface wireguard peers find interface=mkg-wg ${peer}]] = 0) do={/interface wireguard peers remove [find interface=mkg-wg]; /interface wireguard peers add interface=mkg-wg ${peer} endpoint-address=${vpn.endpointHost} endpoint-port=${vpn.endpointPort} allowed-address=${vpn.subnet} persistent-keepalive=25s}`,
+    ].join("\n")
+  );
+}
+
 /**
  * What mkg-heartbeat runs each minute, served fresh by the platform (so it improves without anyone
  * re-running setup). Reads the router's own figures and posts them to the callback as a form
@@ -633,7 +661,7 @@ export function buildHeartbeatScript(
   /** walledGarden: this ISP's hotspotWalledGardenHosts, kept in sync on RouterOS 7 routers.
    *  checkInEvery: how often this router should report ("5m" on a small router, see
    *  heartbeat-interval.ts in @mashupkgrid/network); the router's scheduler is set to it. */
-  options: { hotspotCheck?: boolean; walledGarden?: readonly string[]; checkInEvery?: "1m" | "5m" | null } = {}
+  options: { hotspotCheck?: boolean; walledGarden?: readonly string[]; checkInEvery?: "1m" | "5m" | null; vpn?: VpnPeerSettings | null } = {}
 ): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
@@ -645,6 +673,8 @@ export function buildHeartbeatScript(
     // A small router reports every 5 minutes: two TLS downloads a minute kept a hAP lite's one
     // 650 MHz core at 100%. Changed only when it differs, so nothing is written each time.
     ...(options.checkInEvery ? [checkInInterval(options.checkInEvery)] : []),
+    // RouterOS 7: the management VPN, put back when a part is missing (see vpnRepair).
+    ...(options.vpn && options.hotspotCheck !== false ? [vpnRepair(options.vpn)] : []),
     // Self-repair, each change made only when something is actually wrong, so a healthy router
     // writes nothing every minute. Radio commands go through deferred(): a router without that
     // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
@@ -679,6 +709,8 @@ export function buildHeartbeatScript(
     // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
     `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
     ...(options.hotspotCheck === false ? [] : [HOTSPOT_CHECK]),
+    // The router's WireGuard key, so the platform registers it again if it changed or was lost.
+    ...(options.hotspotCheck === false ? [] : [`:do {:local k [:parse ":return [/interface wireguard get [find name=mkg-wg] public-key]"]; :set d ($d . "&wgkey=" . [$k])} on-error={}`]),
     `:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no} on-error={}`,
     HEARTBEAT_LOCK_CLOSE,
     `}`,

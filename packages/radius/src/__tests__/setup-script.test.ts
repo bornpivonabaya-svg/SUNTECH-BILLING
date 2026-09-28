@@ -353,6 +353,30 @@ describe("router health report", () => {
     expect(v6.length).toBeLessThan(3950);
   });
 
+  it("puts back a missing management VPN piece by piece, and reports the router's key (RouterOS 7)", () => {
+    const vpn = { serverPublicKey: "SERVERKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", endpointHost: "68.210.187.104", endpointPort: 51820, subnet: "10.90.0.0/16", vpnIp: "10.90.0.35" };
+    const report = buildHeartbeatScript(callbackUrl, undefined, { vpn });
+    const repair = plainCommands(report);
+    expect(repair).toContain(":if ([:len [/interface wireguard find name=mkg-wg]] = 0) do={/interface wireguard add name=mkg-wg listen-port=51820}");
+    expect(repair).toContain('/ip address add address=10.90.0.35/32 interface=mkg-wg');
+    // The peer: added when this server's key isn't there (the "no peer" case), replacing a wrong one.
+    expect(repair).toContain(
+      ':if ([:len [/interface wireguard peers find interface=mkg-wg public-key="SERVERKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]] = 0) do={/interface wireguard peers remove [find interface=mkg-wg]; /interface wireguard peers add interface=mkg-wg public-key="SERVERKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" endpoint-address=68.210.187.104 endpoint-port=51820 allowed-address=10.90.0.0/16 persistent-keepalive=25s}'
+    );
+    // Through :parse, so a router without WireGuard skips only this.
+    expect(report).toContain(':do {:local mkgCmd [:parse ":if ([:len [/interface wireguard find name=mkg-wg]]');
+    expect(report).toContain('"&wgkey="');
+    // RouterOS 6 and a router with no VPN address: nothing.
+    expect(buildHeartbeatScript(callbackUrl, undefined, { vpn, hotspotCheck: false })).not.toContain("wireguard peers add");
+    expect(buildHeartbeatScript(callbackUrl)).not.toContain("wireguard peers add");
+  });
+
+  it("keeps building the VPN when sending the router's key fails", () => {
+    const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, { routerOsMajor: 7, serverPublicKey: "SERVERKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" });
+    expect(script).toContain(":do {/tool fetch url=");
+    expect(script).toMatch(/http-data=\$routerPublicKey keep-result=no\} on-error=\{\}/);
+  });
+
   it("runs one report at a time, on RouterOS 6 and 7", () => {
     for (const report of [buildHeartbeatScript(callbackUrl), buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })]) {
       const lines = report.trimEnd().split("\n");
