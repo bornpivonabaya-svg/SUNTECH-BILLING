@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { ensureDefaultPlans } from "../lib/default-plans.js";
 import { prisma } from "@mashupkgrid/database";
 import {
   initiateSubscriptionChargeStkPush,
@@ -18,8 +19,10 @@ const preHandler = [authenticate, resolveTenant, checkMaintenance, requirePermis
 const renewSchema = z.object({ phone: z.string().min(9) });
 const choosePlanSchema = z.object({ planId: z.string().uuid(), billingCycle: z.enum(["MONTHLY", "ANNUAL"]).default("MONTHLY") });
 
-/** Plans an ISP can pick for itself: active ones, in the platform's order. */
-function listPlans() {
+/** Plans an ISP can pick for itself: active ones, in the platform's order. A platform with no
+ *  plans at all gets the default set first, so the ISP never meets "No plans are available". */
+async function listPlans() {
+  await ensureDefaultPlans().catch(() => 0);
   return prisma.tenantPlan.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: "asc" }, { monthlyPriceMinor: "asc" }],
