@@ -11,32 +11,63 @@ function sanitizeForScript(value: string): string {
   return value.replace(/[^\w .-]/g, "").trim() || "router";
 }
 
-/** Every third-party host an unauthenticated hotspot client must reach BEFORE it can pay and
- *  log in. Derived from what packages/payments actually calls, not guesswork:
+/** Card-payment hosts an unpaid customer must reach to pay by card, by gateway. Only ISPs that
+ *  switched that gateway on get them (see hotspotWalledGardenHosts): every walled-garden name is a
+ *  hole a "free browsing" app can claim to be visiting, so a hotspot that only takes M-Pesa, whose
+ *  STK push goes server to server, needs none of them.
  *
- *  - Safaricom / M-Pesa (packages/payments/src/mpesa) — the STK push itself is server-to-server,
- *    but the customer's own M-Pesa confirmation and any Daraja-hosted fallback page are not.
- *  - Paystack (packages/payments/src/paystack) — the customer is redirected to Paystack's hosted
- *    checkout, which pulls scripts from js.paystack.co and short-links through pstk.it.
- *  - Pesapal (packages/payments/src/pesapal) — same pattern, hosted checkout on pay.pesapal.com.
- *  - The 3-D Secure step-up hosts. A card payment that passes checkout but cannot reach its
- *    issuer's ACS silently fails at the last step, which reads to the customer as "the payment
- *    hung" — the single most confusing failure in a captive portal, since they have no way to
- *    reach a support page either.
+ *  - Paystack (packages/payments/src/paystack): hosted checkout, scripts from js.paystack.co,
+ *    short links through pstk.it.
+ *  - Pesapal (packages/payments/src/pesapal): hosted checkout on pay.pesapal.com.
+ *  - Either: the 3-D Secure step-up hosts. A card payment that cannot reach its issuer's ACS
+ *    fails silently at the last step.
  *
- *  Wildcards throughout: every one of these is CDN-fronted with rotating addresses, so pinning
- *  exact hosts is what breaks the moment a provider re-points a record. */
+ *  Wildcards: every one of these is CDN-fronted with rotating addresses. */
+export type CardGateway = "PAYSTACK" | "PESAPAL";
+const CARD_3DS_HOSTS = ["*.visa.com", "*.mastercard.com", "*.cardinalcommerce.com", "*.modirum.com"] as const;
+export const CARD_GATEWAY_WALLED_GARDEN_HOSTS: Record<CardGateway, readonly string[]> = {
+  PAYSTACK: ["*.paystack.com", "*.paystack.co", "*.pstk.it"],
+  PESAPAL: ["*.pesapal.com"],
+};
+/** Every card host any ISP may need, for display on the super admin's walled-garden page. */
 export const PAYMENT_GATEWAY_WALLED_GARDEN_HOSTS = [
-  "*.safaricom.co.ke",
-  "*.paystack.com",
-  "*.paystack.co",
-  "*.pstk.it",
-  "*.pesapal.com",
-  "*.visa.com",
-  "*.mastercard.com",
-  "*.cardinalcommerce.com",
-  "*.modirum.com",
+  ...CARD_GATEWAY_WALLED_GARDEN_HOSTS.PAYSTACK,
+  ...CARD_GATEWAY_WALLED_GARDEN_HOSTS.PESAPAL,
+  ...CARD_3DS_HOSTS,
 ] as const;
+
+/** The card hosts for the gateways an ISP uses; none at all for an M-Pesa-only hotspot. */
+export function cardGatewayHosts(gateways: readonly CardGateway[] = []): string[] {
+  const hosts = gateways.flatMap((g) => CARD_GATEWAY_WALLED_GARDEN_HOSTS[g] ?? []);
+  return hosts.length ? [...hosts, ...CARD_3DS_HOSTS] : [];
+}
+
+/**
+ * Everything one ISP's routers let an unpaid device reach: the portal and API by exact name, the
+ * ISP's own portal domains, the card gateways it uses, and hosts a super admin or the ISP allowed.
+ * Exact names on purpose. The router checks those by the address it resolves itself, but a
+ * wildcard ("*.mashuphost.tech", "*.safaricom.co.ke") is matched on the name a device claims to
+ * visit, which a tunnel app fakes; and mashuphost.tech itself is behind Cloudflare's proxy, so
+ * allowing it opened every site on Cloudflare. Neither is needed before payment.
+ */
+export function hotspotWalledGardenHosts(opts: {
+  serverHost?: string;
+  apiHost: string;
+  portalHost: string;
+  portalDomains?: string[];
+  cardGateways?: readonly CardGateway[];
+  extraHosts?: string[];
+}): string[] {
+  const hosts = [
+    opts.serverHost ?? "",
+    opts.portalHost,
+    opts.apiHost,
+    ...(opts.portalDomains ?? []).map(hostFromUrl),
+    ...cardGatewayHosts(opts.cardGateways),
+    ...(opts.extraHosts ?? []),
+  ];
+  return [...new Set(hosts.map((h) => h.trim().toLowerCase()).filter(Boolean))];
+}
 
 /** What an unpaid device may do with a walled-garden address: open web pages, nothing else. An
  *  entry with no protocol opened those servers on every port and protocol, which "free browsing"
@@ -106,39 +137,6 @@ function hostFromUrl(value: string): string {
   } catch {
     return value.replace(/^https?:\/\//, "").split("/")[0]!.split(":")[0]!;
   }
-}
-
-/** Two-part public suffixes this platform actually meets. Kenya is the primary market (see the
- *  Tenant model's KES/Africa-Nairobi defaults) where "acme.co.ke" is the registrable domain, not
- *  "co.ke" — getting that wrong would emit a "*.co.ke" walled-garden rule, opening the hotspot
- *  to an entire country's namespace. Not a full public-suffix list, and deliberately so: an
- *  unlisted suffix falls back to the last two labels, which is merely narrower than ideal
- *  (a redundant exact-host entry) rather than dangerously wide. */
-const MULTI_PART_TLDS = new Set([
-  "co.ke", "or.ke", "ne.ke", "ac.ke", "go.ke", "sc.ke", "me.ke", "mobi.ke", "info.ke",
-  "co.tz", "co.ug", "co.rw", "co.za", "org.za", "com.ng", "com.gh", "co.zm", "co.zw",
-  "co.uk", "org.uk", "ac.uk", "com.au", "co.nz", "com.br", "co.in",
-]);
-
-/** The registrable domain — "api.mashuphost.tech" and "portal.acme.co.ke" reduce to
- *  "mashuphost.tech" and "acme.co.ke" respectively. */
-function registrableDomain(host: string): string {
-  const parts = host.split(".");
-  if (parts.length <= 2) return host;
-  const labelCount = MULTI_PART_TLDS.has(parts.slice(-2).join(".")) ? 3 : 2;
-  return parts.slice(-labelCount).join(".");
-}
-
-/** A host plus one wildcard covering its registrable domain. The exact host alone is not enough:
- *  a portal behind a CDN (mashuphost.tech sits behind Cloudflare) pulls assets and API calls from
- *  sibling names, and a tenant's own domain usually answers on both the apex and www. The
- *  wildcard is anchored at the registrable domain rather than the host, so "api.example.com"
- *  contributes "*.example.com" — a useful rule — instead of "*.api.example.com", which would
- *  match nothing anyone visits. An IP is returned as-is; it has no subdomains. */
-function hostWithSubdomains(host: string): string[] {
-  if (!host) return [];
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return [host];
-  return [host, `*.${registrableDomain(host)}`];
 }
 
 /** Blocks a customer re-sharing their paid session over their own phone hotspot or travel router.
@@ -278,6 +276,8 @@ export function buildMikrotikProvisioningScript(
      *  by packages/network normalizeWalledGardenHost. Added verbatim: an IP goes to the IP menu,
      *  a name to both, exactly like the built-in entries. */
     extraWalledGardenHosts?: string[];
+    /** Card gateways this ISP takes payments with; their checkout hosts join the walled garden. */
+    cardGateways?: readonly CardGateway[];
     /** PPPoE server settings. Omitted entirely when `pppoeInterface` is absent — see the step 8
      *  comment in the generated script for why this is opt-in rather than defaulted. */
     pppoeInterface?: string | null;
@@ -354,16 +354,14 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
   // Order matters only for readability of the generated script; walledGardenLines de-dupes.
   // The tenant's own domains come before the gateways so an operator reading the script sees
   // "my portal is reachable" first — that is the entry they most often need to check.
-  const walledGardenHosts = [
+  const walledGardenHosts = hotspotWalledGardenHosts({
     serverHost,
-    "captive.mashuphost.tech",
-    ...hostWithSubdomains(apiHost),
-    ...hostWithSubdomains(portalHost),
-    ...hostWithSubdomains("mashuphost.tech"),
-    ...(options.portalDomains ?? []).flatMap((d) => hostWithSubdomains(hostFromUrl(d))),
-    ...PAYMENT_GATEWAY_WALLED_GARDEN_HOSTS,
-    ...(options.extraWalledGardenHosts ?? []),
-  ];
+    apiHost,
+    portalHost,
+    portalDomains: options.portalDomains,
+    cardGateways: options.cardGateways,
+    extraHosts: options.extraWalledGardenHosts,
+  });
 
   const rawHotspotPorts = (options.hotspotPorts && options.hotspotPorts.length > 0)
     ? options.hotspotPorts
@@ -540,6 +538,31 @@ const UNPAID_REPAIR =
   `:do {:if ([:len [/ip firewall filter find comment="${UNPAID_DNS_COMMENT}"]] != ${UNPAID_DNS_RULES.length}) do={/ip firewall filter remove [find comment="${UNPAID_DNS_COMMENT}"]; ${UNPAID_DNS_RULES.join("; ")}}} on-error={}`;
 
 /**
+ * Makes a router's walled garden exactly this list, for the entries the platform manages (comment
+ * "MASHUPKGRID"; anything an operator added by hand is left alone): entries no longer on it — the
+ * old "*.mashuphost.tech" and "*.safaricom.co.ke" wildcards, mashuphost.tech itself, card hosts
+ * of a gateway the ISP turned off — are removed, and missing ones added, names to both menus
+ * (the IP menu web pages only, and never a wildcard, which it can't resolve). IP addresses are
+ * not handled here: the IP menu keeps them as dst-address, which this leaves alone.
+ */
+export function walledGardenSync(hosts: readonly string[]): string {
+  const names = hosts.filter((h) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(h) && /^[\w.*-]+$/.test(h));
+  if (names.length === 0) return "";
+  const list = `{${names.map((h) => `"${h}"`).join(";")}}`;
+  const prune = (menu: string) =>
+    `:foreach e in=[${menu} find comment="MASHUPKGRID"] do={:local h [${menu} get $e dst-host]; :if ([:len $h] > 0 && [:typeof [:find $ok $h]] = "nil") do={${menu} remove $e}}; `;
+  return (
+    `:do {:local ok ${list}; ` +
+    prune("/ip hotspot walled-garden") +
+    prune("/ip hotspot walled-garden ip") +
+    `:foreach h in=$ok do={` +
+    `:if ([:len [/ip hotspot walled-garden find dst-host=$h]] = 0) do={/ip hotspot walled-garden add dst-host=$h action=allow comment="MASHUPKGRID"}; ` +
+    `:if ([:typeof [:find $h "*"]] = "nil" && [:len [/ip hotspot walled-garden ip find dst-host=$h]] = 0) do={/ip hotspot walled-garden ip add dst-host=$h ${WEB_ONLY} action=accept comment="MASHUPKGRID"}}` +
+    `} on-error={}`
+  );
+}
+
+/**
  * What mkg-heartbeat runs each minute, served fresh by the platform (so it improves without anyone
  * re-running setup). Reads the router's own figures and posts them to the callback as a form
  * body — parseHeartbeatReport in @mashupkgrid/network reads it. Written for RouterOS 6 and 7
@@ -547,7 +570,12 @@ const UNPAID_REPAIR =
  * as may the hotspot user count on a router with no hotspot. Kept well under the 4 KB a v6
  * `fetch output=user` returns.
  */
-export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string, options: { hotspotCheck?: boolean } = {}): string {
+export function buildHeartbeatScript(
+  callbackUrl: string,
+  loginTemplateUrl?: string,
+  /** walledGarden: this ISP's hotspotWalledGardenHosts, kept in sync on RouterOS 7 routers. */
+  options: { hotspotCheck?: boolean; walledGarden?: readonly string[] } = {}
+): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
   return [
@@ -571,7 +599,7 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // Unpaid devices: walled-garden addresses for web pages only, and no DNS tunnels (see WEB_ONLY
     // and UNPAID_DNS_RULES). Routers set up before these existed get them here; RouterOS 6 gets
     // them from its setup script, since its report must stay under 4 KB.
-    ...(options.hotspotCheck === false ? [] : [UNPAID_REPAIR]),
+    ...(options.hotspotCheck === false ? [] : [UNPAID_REPAIR, walledGardenSync(options.walledGarden ?? [])].filter(Boolean)),
     // RouterOS 6 leaves out the "you're online" refresh, like the hotspot check: its report must
     // stay under 4 KB.
     portalRepair(loginTemplateUrl, aloginTemplateUrl, options.hotspotCheck !== false),
