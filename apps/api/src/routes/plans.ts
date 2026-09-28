@@ -6,6 +6,7 @@ import { authenticate } from "../plugins/authenticate.js";
 import { resolveTenant } from "../plugins/tenant.js";
 import { checkMaintenance } from "../plugins/maintenance.js";
 import { requirePermission } from "../plugins/authorize.js";
+import { ensureDefaultPlans } from "../lib/default-plans.js";
 import { writeAuditLog } from "../lib/audit.js";
 
 const preHandler = [authenticate, resolveTenant, checkMaintenance] as const;
@@ -49,6 +50,8 @@ export async function planRoutes(app: FastifyInstance): Promise<void> {
     "/",
     { config: { audience: "staff" }, preHandler: [...preHandler] },
     async (request, reply) => {
+      // A new platform starts with the default plans rather than an empty list.
+      await ensureDefaultPlans().catch(() => 0);
       const plans = await prisma.tenantPlan.findMany({
         where: { isActive: true },
         orderBy: { sortOrder: "asc" },
