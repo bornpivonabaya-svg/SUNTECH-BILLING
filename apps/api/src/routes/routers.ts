@@ -63,6 +63,7 @@ import { requirePermission } from "../plugins/authorize.js";
 import { requireFeature } from "../plugins/require-feature.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { assertWithinPlanLimit } from "../lib/plan-limits.js";
+import { winboxRelayHost } from "../lib/winbox-relay-host.js";
 
 const preHandler = [authenticate, resolveTenant, checkMaintenance] as const;
 
@@ -197,20 +198,6 @@ async function wireguardServer(): Promise<{ serverPublicKey: string; serverHost:
     ? env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0]! : env.WIREGUARD_SERVER_ENDPOINT
     : await platformPublicAddress();
   return { serverPublicKey, serverHost, serverPort: env.WIREGUARD_LISTEN_PORT || 51820 };
-}
-
-/** Where operators point WinBox for the relay: WINBOX_RELAY_PUBLIC_HOST when set, else the API's
- *  own name (api.mashuphost.tech — a DNS-only record straight to this server; the bare domain is
- *  behind Cloudflare's proxy, which carries web traffic only), else the VPN endpoint. */
-function winboxRelayHost(fallback: string): string {
-  if (env.WINBOX_RELAY_PUBLIC_HOST) return env.WINBOX_RELAY_PUBLIC_HOST;
-  try {
-    const host = new URL(env.APP_API_PUBLIC_URL).hostname;
-    if (host && host !== "localhost") return host;
-  } catch {
-    // fall through
-  }
-  return (env.WIREGUARD_SERVER_ENDPOINT || fallback).split(":")[0] || fallback;
 }
 
 /** What a router needs to rebuild its end of the VPN, when the VPN is on and it has an address. */
@@ -706,7 +693,12 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         useTls: router.useTls,
       });
       const cloudHost = await platformPublicAddress();
-      const relayHost = winboxRelayHost(cloudHost) || null;
+      const relayHost =
+        (await winboxRelayHost({
+          override: env.WINBOX_RELAY_PUBLIC_HOST,
+          apiUrl: env.APP_API_PUBLIC_URL,
+          fallback: (env.WIREGUARD_SERVER_ENDPOINT || cloudHost).split(":")[0] || cloudHost,
+        })) || null;
       reply.send(
         successResponse(
           {
