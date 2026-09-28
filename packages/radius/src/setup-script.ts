@@ -564,6 +564,11 @@ const HEARTBEAT_LOCK_OPEN =
   `:if ($mkgRun) do={:set mkgHbBusy $mkgUp`;
 const HEARTBEAT_LOCK_CLOSE = `:set mkgHbBusy ""}`;
 
+/** Sets the mkg-heartbeat scheduler to this interval when it runs at another one. */
+export function checkInInterval(every: "1m" | "5m"): string {
+  return `:do {/system scheduler set [find where name="mkg-heartbeat" and interval!=${every}] interval=${every}} on-error={}`;
+}
+
 /** Shares the internet with every customer, whichever port the internet arrives on: hotspot
  *  (192.168.88.0/24), PPPoE (its pool) and every VLAN's subnet alike. The ether1 masquerade
  *  assumes the internet is on ether1; on a router fed through ether2, an LTE modem or a PPPoE
@@ -625,8 +630,10 @@ export function walledGardenSync(hosts: readonly string[]): string {
 export function buildHeartbeatScript(
   callbackUrl: string,
   loginTemplateUrl?: string,
-  /** walledGarden: this ISP's hotspotWalledGardenHosts, kept in sync on RouterOS 7 routers. */
-  options: { hotspotCheck?: boolean; walledGarden?: readonly string[] } = {}
+  /** walledGarden: this ISP's hotspotWalledGardenHosts, kept in sync on RouterOS 7 routers.
+   *  checkInEvery: how often this router should report ("5m" on a small router, see
+   *  heartbeat-interval.ts in @mashupkgrid/network); the router's scheduler is set to it. */
+  options: { hotspotCheck?: boolean; walledGarden?: readonly string[]; checkInEvery?: "1m" | "5m" | null } = {}
 ): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
@@ -635,6 +642,9 @@ export function buildHeartbeatScript(
     // One report at a time: a report stuck on a slow or broken connection must not be joined by a
     // new one every minute until a small router (hAP lite, 32 MB) runs out of memory.
     HEARTBEAT_LOCK_OPEN,
+    // A small router reports every 5 minutes: two TLS downloads a minute kept a hAP lite's one
+    // 650 MHz core at 100%. Changed only when it differs, so nothing is written each time.
+    ...(options.checkInEvery ? [checkInInterval(options.checkInEvery)] : []),
     // Self-repair, each change made only when something is actually wrong, so a healthy router
     // writes nothing every minute. Radio commands go through deferred(): a router without that
     // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.

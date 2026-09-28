@@ -341,6 +341,18 @@ describe("router health report", () => {
     expect(line).not.toContain("dst-path"); // nothing written to flash every minute
   });
 
+  it("sets a small router's check-in to every 5 minutes, only when it differs", () => {
+    const small = buildHeartbeatScript(callbackUrl, undefined, { checkInEvery: "5m" });
+    expect(small).toContain(':do {/system scheduler set [find where name="mkg-heartbeat" and interval!=5m] interval=5m} on-error={}');
+    expect(buildHeartbeatScript(callbackUrl, undefined, { checkInEvery: "1m" })).toContain("interval!=1m] interval=1m");
+    // Size not known yet: the schedule is left as it is.
+    expect(buildHeartbeatScript(callbackUrl)).not.toContain("/system scheduler set");
+    // RouterOS 6 small routers (hAP lite on v6) get it too, and stay under 4 KB.
+    const v6 = buildHeartbeatScript(`https://api.mashuphost.tech/api/v1/routers/provision/${"a".repeat(64)}/callback`, "https://api.mashuphost.tech/api/v1/hotspot/a-rather-long-isp-name/mikrotik-login-template", { hotspotCheck: false, checkInEvery: "5m" });
+    expect(v6).toContain("interval=5m");
+    expect(v6.length).toBeLessThan(3950);
+  });
+
   it("runs one report at a time, on RouterOS 6 and 7", () => {
     for (const report of [buildHeartbeatScript(callbackUrl), buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false })]) {
       const lines = report.trimEnd().split("\n");

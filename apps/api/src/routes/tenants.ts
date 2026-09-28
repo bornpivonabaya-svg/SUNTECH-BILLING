@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma, type Tenant } from "@mashupkgrid/database";
 import { initiateOnboardingFeeStkPush, getOnboardingFeeStatus } from "@mashupkgrid/payments";
 import { env } from "@mashupkgrid/config";
+import { heartbeatOnlineWindowMs } from "@mashupkgrid/network";
 import {
   successResponse,
   NotFoundError,
@@ -165,7 +166,7 @@ async function loadTenantUsage(tenantIds: string[]): Promise<Map<string, TenantU
   const [routers, customers, revenue] = await Promise.all([
     prisma.router.findMany({
       where: { tenantId: { in: tenantIds }, deletedAt: null },
-      select: { tenantId: true, status: true, lastSeenAt: true },
+      select: { tenantId: true, status: true, lastSeenAt: true, memoryTotalBytes: true, boardName: true },
     }),
     prisma.customer.groupBy({
       by: ["tenantId"],
@@ -195,7 +196,8 @@ async function loadTenantUsage(tenantIds: string[]): Promise<Map<string, TenantU
     const isReallyOnline =
       row.status === "ONLINE" &&
       row.lastSeenAt !== null &&
-      nowMs - new Date(row.lastSeenAt).getTime() <= 150_000;
+      // Every minute, or every 5 on a small router: 2.5 check-ins (heartbeat-interval.ts).
+      nowMs - new Date(row.lastSeenAt).getTime() <= heartbeatOnlineWindowMs(row);
     if (isReallyOnline) entry.routersOnline += 1;
   }
   for (const row of customers) usage.get(row.tenantId)!.customerCount = row._count._all;

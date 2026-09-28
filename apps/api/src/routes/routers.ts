@@ -39,6 +39,9 @@ import {
   platformPublicAddress,
   listWalledGardenHostsFor,
   reconcileRouterProvisioning,
+  heartbeatOnlineWindowMs,
+  heartbeatLateWindowMs,
+  heartbeatIntervalRouterOs,
 } from "@mashupkgrid/network";
 import {
   buildMikrotikProvisioningScript,
@@ -209,7 +212,8 @@ function requireTenant(tenantId: string | null): string {
  *  many orders of magnitude under Number.MAX_SAFE_INTEGER measured in bytes. */
 function computeLiveRouterStatus(
   status: "UNKNOWN" | "ONLINE" | "WARNING" | "DOWN",
-  lastSeenAt: Date | string | null
+  lastSeenAt: Date | string | null,
+  size: { memoryTotalBytes?: bigint | number | null; boardName?: string | null } = {}
 ): "UNKNOWN" | "ONLINE" | "WARNING" | "DOWN" {
   if (status === "UNKNOWN" || !lastSeenAt) {
     return "UNKNOWN";
@@ -218,22 +222,22 @@ function computeLiveRouterStatus(
   if (isNaN(lastSeenMs)) return status;
 
   const elapsedMs = Date.now() - lastSeenMs;
-  // Heartbeat is scheduled every 60s (1 minute).
-  // 1. Within 2.5 minutes (150s) = Healthy ONLINE.
-  if (elapsedMs <= 150_000) {
+  // The router checks in every minute, or every 5 on a small router (heartbeat-interval.ts).
+  // 1. Within 2.5 intervals = healthy ONLINE.
+  if (elapsedMs <= heartbeatOnlineWindowMs(size)) {
     return "ONLINE";
   }
-  // 2. Between 2.5m and 4m (240s) = WARNING (delayed / lagging heartbeat).
-  if (elapsedMs <= 240_000) {
+  // 2. Up to 4 intervals = WARNING (delayed / lagging heartbeat).
+  if (elapsedMs <= heartbeatLateWindowMs(size)) {
     return "WARNING";
   }
-  // 3. Over 4 minutes without a single heartbeat = The router is OFF / DOWN.
+  // 3. Longer without a single heartbeat = the router is OFF / DOWN.
   return "DOWN";
 }
 
 function toRouterSummary(router: RouterRow) {
   const { usernameEncrypted: _u, passwordEncrypted: _p, provisionTokenHash: _t, previousProvisionTokenHash: _pt, vpnRegisterTokenHash: _vt, ...summary } = router;
-  const effectiveStatus = computeLiveRouterStatus(summary.status, summary.lastSeenAt);
+  const effectiveStatus = computeLiveRouterStatus(summary.status, summary.lastSeenAt, summary);
 
   // Auto-sync database row if a router has silently died / been powered off
   if (summary.status === "ONLINE" && effectiveStatus !== "ONLINE") {
@@ -1067,6 +1071,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       buildHeartbeatScript(callbackUrl, loginTemplateUrl, {
         hotspotCheck: !isV6,
         walledGarden: isV6 ? [] : await tenantWalledGarden(router.tenantId),
+        // Every 5 minutes on a small router (hAP lite and the like), every minute otherwise.
+        checkInEvery: heartbeatIntervalRouterOs(router),
       })
     );
   });
