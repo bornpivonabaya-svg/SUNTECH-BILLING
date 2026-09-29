@@ -1112,6 +1112,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
         vpn: isV6 ? null : await routerVpnSettings(router),
         // RADIUS goes to this server's own address, put back if the router has another.
         radiusHost: await routerRadiusHost(),
+        // …and its RADIUS entry is put back or corrected with this secret (the one setup uses).
+        radiusSecret: isV6 ? null : (await getGeneratedCredentials(router.tenantId, router.id).catch(() => null))?.password ?? null,
         // The router compares its pages with these sizes: no need to read the files.
         pageSizes: tenant ? portalPageSizes(tenant.slug, tenant.name) : undefined,
       })

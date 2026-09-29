@@ -546,6 +546,21 @@ describe("router report — self-repair for every router", () => {
     expect(buildHeartbeatScript(callbackUrl)).not.toContain("/radius set");
   });
 
+  it("adds a missing RADIUS entry and corrects a wrong secret when it knows the secret", () => {
+    const line = radiusRepair("62.171.144.87", "s3cretKey99");
+    expect(line).toContain(':if ([:len $r] = 0) do={/radius add service=ppp,hotspot address=62.171.144.87 secret="s3cretKey99" authentication-port=1812 accounting-port=1813 timeout=3s comment="MASHUPKGRID"}');
+    expect(line).toContain(':if ([/radius get $e secret] != "s3cretKey99") do={/radius set $e secret="s3cretKey99"}');
+    expect(line).toContain(":if ([/ppp aaa get use-radius] = false) do={/ppp aaa set use-radius=yes accounting=yes}");
+    for (const c of "{}[]()") expect(line.split(c).length).toBeGreaterThan(1);
+    expect(line.split("{").length).toBe(line.split("}").length);
+    expect(line.split("[").length).toBe(line.split("]").length);
+    // A secret that can't be quoted safely: address fix only.
+    expect(radiusRepair("62.171.144.87", 'bad"secret$x')).not.toContain("secret=");
+    // In the report on RouterOS 7; RouterOS 6 (4 KB limit) gets the address fix only.
+    expect(buildHeartbeatScript(callbackUrl, undefined, { radiusHost: "62.171.144.87", radiusSecret: "s3cretKey99" })).toContain(line);
+    expect(buildHeartbeatScript(callbackUrl, undefined, { hotspotCheck: false, radiusHost: "62.171.144.87", radiusSecret: "s3cretKey99" })).not.toContain("secret=");
+  });
+
   it("repairs RADIUS on RouterOS 6 too, within the 4 KB its fetch returns", () => {
     const long = `https://isp.suntechke.com/api/v1/routers/provision/${"a".repeat(64)}/callback`;
     const login = "https://isp.suntechke.com/api/v1/hotspot/a-rather-long-isp-name/mikrotik-login-template";

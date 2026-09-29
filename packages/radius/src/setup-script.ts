@@ -657,14 +657,29 @@ export function vpnRepair(vpn: VpnPeerSettings): string {
 }
 
 /**
- * Puts the platform's RADIUS entry (comment="MASHUPKGRID") back on this server's address when the
- * router has another one: an address that pointed at a proxy (Cloudflare answers no RADIUS), an
- * old server or a mistyped IP made every hotspot and PPPoE login time out until someone re-ran
- * setup. Only the address is changed, and only when it differs; the shared secret is left as is.
+ * Keeps the platform's RADIUS entry (comment="MASHUPKGRID") right on every report, so hotspot and
+ * PPPoE logins never stop with "RADIUS server is not responding" because of the router's side:
+ * - address: put back on this server's address when it differs (an address that pointed at a
+ *   proxy such as Cloudflare, an old server or a mistyped IP made every login time out);
+ * - with the shared secret (RouterOS 7): the entry is added back when it is missing (a reset, a
+ *   setup cut short) and its secret corrected when it differs (a wrong secret is dropped silently
+ *   by the server, which also looks like a timeout); PPP logins are sent to RADIUS.
+ * Each change is made only when something differs. RouterOS 6 gets the address fix only: its
+ * report must stay under the 4 KB its fetch returns. A secret the script can't quote safely is
+ * left out rather than risk breaking the report.
  */
-export function radiusRepair(radiusHost: string): string {
+export function radiusRepair(radiusHost: string, secret?: string | null): string {
   if (!/^[0-9a-zA-Z.:-]+$/.test(radiusHost)) return "";
-  return `:do {:foreach r in=[/radius find comment="MASHUPKGRID"] do={:if ([:tostr [/radius get $r address]] != "${radiusHost}") do={/radius set $r address=${radiusHost}}}} on-error={}`;
+  if (!secret || !/^[A-Za-z0-9._~+\/=@#%^*()!-]{8,128}$/.test(secret)) {
+    return `:do {:foreach r in=[/radius find comment="MASHUPKGRID"] do={:if ([:tostr [/radius get $r address]] != "${radiusHost}") do={/radius set $r address=${radiusHost}}}} on-error={}`;
+  }
+  return (
+    `:do {:local r [/radius find comment="MASHUPKGRID"]; ` +
+    `:if ([:len $r] = 0) do={/radius add service=ppp,hotspot address=${radiusHost} secret="${secret}" authentication-port=1812 accounting-port=1813 timeout=3s comment="MASHUPKGRID"} else={` +
+    `:foreach e in=$r do={:if ([:tostr [/radius get $e address]] != "${radiusHost}") do={/radius set $e address=${radiusHost}}; ` +
+    `:if ([/radius get $e secret] != "${secret}") do={/radius set $e secret="${secret}"}}}; ` +
+    `:if ([/ppp aaa get use-radius] = false) do={/ppp aaa set use-radius=yes accounting=yes}} on-error={}`
+  );
 }
 
 /**
@@ -690,6 +705,8 @@ export function buildHeartbeatScript(
     pageSizes?: { login?: number | null; alogin?: number | null };
     /** This server's address for RADIUS; the router's entry is put back on it (radiusRepair). */
     radiusHost?: string | null;
+    /** The router's RADIUS shared secret, so a missing or wrong entry is repaired (RouterOS 7). */
+    radiusSecret?: string | null;
   } = {}
 ): string {
   const get = (field: string) => `[/system resource get ${field}]`;
@@ -705,7 +722,9 @@ export function buildHeartbeatScript(
     // RouterOS 7: the management VPN, put back when a part is missing (see vpnRepair).
     ...(options.vpn && options.hotspotCheck !== false ? [vpnRepair(options.vpn)] : []),
     // RADIUS to this server's own address, on every version: logins time out otherwise.
-    ...(options.radiusHost ? [radiusRepair(options.radiusHost)].filter(Boolean) : []),
+    ...(options.radiusHost
+      ? [radiusRepair(options.radiusHost, options.hotspotCheck === false ? null : options.radiusSecret)].filter(Boolean)
+      : []),
     // Self-repair, each change made only when something is actually wrong, so a healthy router
     // writes nothing every minute. Radio commands go through deferred(): a router without that
     // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
