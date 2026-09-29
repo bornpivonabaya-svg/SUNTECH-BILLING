@@ -316,13 +316,25 @@ export function parseAccessPointReport(raw: string): ConnectedAccessPoint[] {
   return aps;
 }
 
+/** Before downloading anything: a router with no internet yet (a fresh or reset router) gets it on
+ *  ether1 from the upstream modem by DHCP, with public DNS if it has none, and waits up to 20 s
+ *  for it. Done only when the router has no working default route, so a router already online
+ *  through a fixed address or PPPoE from its provider is left exactly as it is. Written for
+ *  RouterOS 6 and 7. */
+const ENSURE_INTERNET =
+  `:if ([:len [/ip route find dst-address=0.0.0.0/0 active=yes]] = 0) do={` +
+  `:put "No internet yet: asking the modem on ether1 for an address..."; ` +
+  `:if ([:len [/ip dhcp-client find interface=ether1]] = 0) do={/ip dhcp-client add interface=ether1 disabled=no} else={/ip dhcp-client enable [find interface=ether1]}; ` +
+  `:if ([:len [/ip dns get servers]] = 0) do={/ip dns set servers=8.8.8.8,1.1.1.1}; ` +
+  `:for i from=1 to=20 do={:if ([:len [/ip route find dst-address=0.0.0.0/0 active=yes]] = 0) do={:delay 1s}}}; `;
+
 /** The one line an ISP pastes into the router's terminal. It checks in as soon as the download
  *  works, so a router that reached us always shows up on the dashboard, whatever happens in the
  *  setup after it. The import runs as a background job (:execute) — see the provisioning-script
  *  route — with its output in mkg-setup.txt on the router. */
 function setupFetchCommand(provisionToken: string): string {
   const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
-  return `/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in Suntech within a minute."`;
+  return `${ENSURE_INTERNET}/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in Suntech within a minute."`;
 }
 
 export async function routerRoutes(app: FastifyInstance): Promise<void> {
