@@ -87,7 +87,11 @@ describe("the router's hotspot self-check", () => {
     // The report itself came over the internet: an unanswered ping with DNS working is just an ISP
     // or modem that blocks ping.
     expect(codes({ ping: 0, dns: 1 })).toEqual([]);
-    expect(codes({ srv: 0, login: 0, radios: 0, garden: 0 })).toEqual(["no-hotspot", "no-login-page", "wifi-not-bridged", "no-walled-garden"]);
+    expect(codes({ srv: 0, login: 0, radios: 0, garden: 0 })).toEqual(["no-hotspot", "no-login-page", "no-walled-garden"]);
+    // A router without Wi-Fi feeding wired access points: fine while phones get addresses.
+    expect(codes({ srv: 2, radios: 0, leases: 5, hosts: 5 })).toEqual([]);
+    // Nobody reached it at all: says what to check, for routers with and without Wi-Fi.
+    expect(codes({ srv: 2, radios: 0, leases: 0, hosts: 0 })).toEqual(["no-devices"]);
     expect(codes({ dnsnat: 240 })).toEqual(["dns-rules-piled"]);
     expect(codes({ srv: 1, leases: 3, hosts: 0 })).toEqual(["hosts-bypass"]);
     expect(hotspotProblems(null)).toEqual([]);

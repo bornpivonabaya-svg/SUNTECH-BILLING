@@ -94,7 +94,14 @@ export function hotspotProblems(check: HotspotCheck | null | undefined): Hotspot
   if (check.dns === 0) out.push({ code: "no-dns", message: "The router can't look up names (DNS), so the sign-in page and every website fail." });
   if (check.srv === 0) out.push({ code: "no-hotspot", message: "No hotspot server is running on the router, so phones never get the sign-in page." });
   if (check.login === 0) out.push({ code: "no-login-page", message: "The sign-in page file (hotspot/login.html) is missing on the router." });
-  if (check.radios === 0) out.push({ code: "wifi-not-bridged", message: "The Wi-Fi isn't part of the hotspot bridge, so Wi-Fi phones bypass the hotspot." });
+  // No radio in the bridge is normal on a router without Wi-Fi (RB4011, RB750, CCR) that feeds
+  // wired access points: only a problem when no phone has reached the router either.
+  if (check.radios === 0 && check.leases === 0 && check.srv !== 0)
+    out.push({
+      code: "no-devices",
+      message:
+        "No phone has reached the hotspot yet. On a router with Wi-Fi, its radio isn't in the hotspot bridge. On a router without Wi-Fi, plug the access point into a hotspot port and set it to access point (bridge) mode with its own DHCP off.",
+    });
   if (check.garden === 0) out.push({ code: "no-walled-garden", message: "The payment portal isn't in the walled garden, so the sign-in page can't open." });
   if (check.lsize !== undefined && check.lsize < 200)
     out.push({ code: "login-page-broken", message: `The sign-in page file in ${check.dir ?? "hotspot"} is empty or broken (${check.lsize} bytes), so phones get no sign-in page.` });
