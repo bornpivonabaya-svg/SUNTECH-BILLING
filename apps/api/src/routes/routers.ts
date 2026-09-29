@@ -186,15 +186,16 @@ async function tenantWalledGarden(tenantId: string): Promise<string[]> {
 /** The platform's end of the management VPN: its public key (from the environment, else from
  *  wg0 itself) and the host routers dial. */
 async function wireguardServer(): Promise<{ serverPublicKey: string; serverHost: string; serverPort: number }> {
-  let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
-  if (!serverPublicKey) {
-    try {
-      const { execFileSync } = await import("node:child_process");
-      serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], { encoding: "utf-8" }).trim();
-    } catch {
-      serverPublicKey = "";
-    }
+  // The key the interface is really running with comes first: a WIREGUARD_SERVER_PUBLIC_KEY left
+  // over from an earlier key would send every router to a peer that doesn't exist.
+  let serverPublicKey = "";
+  try {
+    const { execFileSync } = await import("node:child_process");
+    serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], { encoding: "utf-8" }).trim();
+  } catch {
+    serverPublicKey = "";
   }
+  if (!serverPublicKey) serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
   const serverHost = env.WIREGUARD_SERVER_ENDPOINT
     ? env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0]! : env.WIREGUARD_SERVER_ENDPOINT
     : await platformPublicAddress();
@@ -1097,6 +1098,8 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
         // Every 5 minutes on a small router (hAP lite and the like), every minute otherwise.
         checkInEvery: heartbeatIntervalRouterOs(router),
         vpn: isV6 ? null : await routerVpnSettings(router),
+        // RADIUS goes to this server's own address, put back if the router has another.
+        radiusHost: await routerRadiusHost(),
         // The router compares its pages with these sizes: no need to read the files.
         pageSizes: tenant ? portalPageSizes(tenant.slug, tenant.name) : undefined,
       })

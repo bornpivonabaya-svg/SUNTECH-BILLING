@@ -4,6 +4,8 @@ import {
   buildMikrotikProvisioningScript as buildRawScript,
   buildMikrotikWinboxScript,
   buildHeartbeatScript,
+  radiusRepair,
+  vpnRepair,
   ALOGIN_PAGE_MARKER,
   UNPAID_DNS_RULES,
   walledGardenSync,
@@ -521,5 +523,34 @@ describe("router health report", () => {
     expect(report).toContain(
       ':if ($aok = false) do={:do {/tool fetch url="https://api.example.com/api/v1/hotspot/demo-isp/mikrotik-alogin-template" dst-path=($dir . "/alogin.html")'
     );
+  });
+});
+
+describe("router report — self-repair for every router", () => {
+  const callbackUrl = "https://isp.example.com/api/v1/routers/provision/tok/callback";
+  const vpn = { serverPublicKey: "uDxnG+CPkSIiueloCTSDdWg2wMded1Rf4bLPHC+JgT4=", endpointHost: "62.171.144.87", endpointPort: 51822, subnet: "10.90.0.0/16", vpnIp: "10.90.0.2" };
+
+  it("points an existing VPN peer back at the server's address and port", () => {
+    const plain = vpnRepair(vpn).replace(/\\(.)/g, "$1");
+    expect(plain).toContain(`:foreach p in=[/interface wireguard peers find interface=mkg-wg public-key="${vpn.serverPublicKey}"]`);
+    expect(plain).toContain(':if ([:tostr [/interface wireguard peers get $p endpoint-address]] != "62.171.144.87") do={/interface wireguard peers set $p endpoint-address=62.171.144.87}');
+    expect(plain).toContain(':if ([:tostr [/interface wireguard peers get $p endpoint-port]] != "51822") do={/interface wireguard peers set $p endpoint-port=51822}');
+  });
+
+  it("puts the platform's RADIUS entry back on this server's address, and only that entry", () => {
+    const line = radiusRepair("62.171.144.87");
+    expect(line).toBe(':do {:foreach r in=[/radius find comment="MASHUPKGRID"] do={:if ([:tostr [/radius get $r address]] != "62.171.144.87") do={/radius set $r address=62.171.144.87}}} on-error={}');
+    // Nothing that could break the script gets through.
+    expect(radiusRepair('1.2.3.4" ; /system reset')).toBe("");
+    expect(buildHeartbeatScript(callbackUrl, undefined, { radiusHost: "62.171.144.87" })).toContain(line);
+    expect(buildHeartbeatScript(callbackUrl)).not.toContain("/radius set");
+  });
+
+  it("repairs RADIUS on RouterOS 6 too, within the 4 KB its fetch returns", () => {
+    const long = `https://isp.suntechke.com/api/v1/routers/provision/${"a".repeat(64)}/callback`;
+    const login = "https://isp.suntechke.com/api/v1/hotspot/a-rather-long-isp-name/mikrotik-login-template";
+    const v6 = buildHeartbeatScript(long, login, { hotspotCheck: false, radiusHost: "62.171.144.87", pageSizes: { login: 2100 } });
+    expect(v6).toContain("/radius set $r address=62.171.144.87");
+    expect(v6.length).toBeLessThan(3900);
   });
 });

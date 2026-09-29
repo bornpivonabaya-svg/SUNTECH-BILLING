@@ -122,6 +122,9 @@ services:
     # and postgres/redis publish no host ports, so it would lose both.
     cap_add:
       - NET_ADMIN
+    # The server's WireGuard key survives rebuilds here (see api-entrypoint.sh).
+    volumes:
+      - wireguard_key:/var/lib/wireguard
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,3 +178,4 @@ volumes:
   postgres_backups:
   redis_data:
   whatsapp_auth:
+  wireguard_key:

@@ -23,14 +23,21 @@ if [ "${ENABLE_WIREGUARD_REMOTE_ACCESS}" = "true" ]; then
   SERVER_IP="$(echo "${WIREGUARD_SUBNET_CIDR:-10.90.0.0/16}" | sed 's#\.0/.*##').1"
   PREFIX="$(echo "${WIREGUARD_SUBNET_CIDR:-10.90.0.0/16}" | sed 's#.*/##')"
 
+  # The generated key is kept in a volume (wireguard_key in docker-compose.prod.yml): a key kept
+  # only inside the container changed on every rebuild, and every router's VPN then pointed at a
+  # key the server no longer had.
+  KEY_DIR="${WIREGUARD_KEY_DIR:-/var/lib/wireguard}"
+  mkdir -p "${KEY_DIR}" 2>/dev/null || true
   if [ -z "${WIREGUARD_SERVER_PRIVATE_KEY}" ]; then
-    if [ -f /tmp/wg_server.key ]; then
+    if [ -s "${KEY_DIR}/server.key" ]; then
+      WIREGUARD_SERVER_PRIVATE_KEY="$(cat "${KEY_DIR}/server.key")"
+    elif [ -s /tmp/wg_server.key ]; then
       WIREGUARD_SERVER_PRIVATE_KEY="$(cat /tmp/wg_server.key)"
     else
       WIREGUARD_SERVER_PRIVATE_KEY="$(wg genkey 2>/dev/null || true)"
-      if [ -n "${WIREGUARD_SERVER_PRIVATE_KEY}" ]; then
-        echo "${WIREGUARD_SERVER_PRIVATE_KEY}" > /tmp/wg_server.key
-      fi
+    fi
+    if [ -n "${WIREGUARD_SERVER_PRIVATE_KEY}" ] && [ ! -s "${KEY_DIR}/server.key" ]; then
+      (umask 077; printf '%s\n' "${WIREGUARD_SERVER_PRIVATE_KEY}" > "${KEY_DIR}/server.key") 2>/dev/null || true
     fi
   fi
 

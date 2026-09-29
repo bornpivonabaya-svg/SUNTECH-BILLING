@@ -649,8 +649,22 @@ export function vpnRepair(vpn: VpnPeerSettings): string {
       `:if ([:len [/interface wireguard find name=mkg-wg]] = 0) do={/interface wireguard add name=mkg-wg listen-port=${vpn.endpointPort}}`,
       `:if ([:len [/ip address find interface=mkg-wg address="${vpn.vpnIp}/32"]] = 0) do={/ip address remove [find interface=mkg-wg]; /ip address add address=${vpn.vpnIp}/32 interface=mkg-wg}`,
       `:if ([:len [/interface wireguard peers find interface=mkg-wg ${peer}]] = 0) do={/interface wireguard peers remove [find interface=mkg-wg]; /interface wireguard peers add interface=mkg-wg ${peer} endpoint-address=${vpn.endpointHost} endpoint-port=${vpn.endpointPort} allowed-address=${vpn.subnet} persistent-keepalive=25s}`,
+      // A peer with the right key but an old address or port (the server moved, or its port
+      // changed) never connects: point it at the server again.
+      `:foreach p in=[/interface wireguard peers find interface=mkg-wg ${peer}] do={:if ([:tostr [/interface wireguard peers get $p endpoint-address]] != "${vpn.endpointHost}") do={/interface wireguard peers set $p endpoint-address=${vpn.endpointHost}}; :if ([:tostr [/interface wireguard peers get $p endpoint-port]] != "${vpn.endpointPort}") do={/interface wireguard peers set $p endpoint-port=${vpn.endpointPort}}}`,
     ].join("\n")
   );
+}
+
+/**
+ * Puts the platform's RADIUS entry (comment="MASHUPKGRID") back on this server's address when the
+ * router has another one: an address that pointed at a proxy (Cloudflare answers no RADIUS), an
+ * old server or a mistyped IP made every hotspot and PPPoE login time out until someone re-ran
+ * setup. Only the address is changed, and only when it differs; the shared secret is left as is.
+ */
+export function radiusRepair(radiusHost: string): string {
+  if (!/^[0-9a-zA-Z.:-]+$/.test(radiusHost)) return "";
+  return `:do {:foreach r in=[/radius find comment="MASHUPKGRID"] do={:if ([:tostr [/radius get $r address]] != "${radiusHost}") do={/radius set $r address=${radiusHost}}}} on-error={}`;
 }
 
 /**
@@ -674,6 +688,8 @@ export function buildHeartbeatScript(
     vpn?: VpnPeerSettings | null;
     /** Exact byte sizes of this ISP's sign-in and "you're online" pages, as the API serves them. */
     pageSizes?: { login?: number | null; alogin?: number | null };
+    /** This server's address for RADIUS; the router's entry is put back on it (radiusRepair). */
+    radiusHost?: string | null;
   } = {}
 ): string {
   const get = (field: string) => `[/system resource get ${field}]`;
@@ -688,6 +704,8 @@ export function buildHeartbeatScript(
     ...(options.checkInEvery ? [checkInInterval(options.checkInEvery)] : []),
     // RouterOS 7: the management VPN, put back when a part is missing (see vpnRepair).
     ...(options.vpn && options.hotspotCheck !== false ? [vpnRepair(options.vpn)] : []),
+    // RADIUS to this server's own address, on every version: logins time out otherwise.
+    ...(options.radiusHost ? [radiusRepair(options.radiusHost)].filter(Boolean) : []),
     // Self-repair, each change made only when something is actually wrong, so a healthy router
     // writes nothing every minute. Radio commands go through deferred(): a router without that
     // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
