@@ -41,7 +41,7 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** The signed-in staff member's notifications from the MashupHost team. Polled gently: these
+/** The signed-in staff member's notifications from the Suntech team. Polled gently: these
  *  are announcements, not chat. */
 export function useNotifications(enabled: boolean) {
   const queryClient = useQueryClient();

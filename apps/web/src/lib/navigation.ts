@@ -143,7 +143,7 @@ function tenantSections(has: Has): NavSection[] {
       ],
     },
     {
-      // The MashupHost gateway, collections, balance and settlements: money held on a tenant's
+      // The Suntech gateway, collections, balance and settlements: money held on a tenant's
       // behalf is the platform's largest liability, so it stays one clear group.
       title: "Money",
       items: [

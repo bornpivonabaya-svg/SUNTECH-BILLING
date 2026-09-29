@@ -431,7 +431,7 @@ export default function RoutersPage() {
     }
   };
 
-  // Remote WinBox goes through the MashupHost server's relay, over the router's VPN.
+  // Remote WinBox goes through the Suntech server's relay, over the router's VPN.
   const relay = winboxAccessData?.relay;
   const remoteWinbox = relay?.address ?? null;
   const remoteWinboxProblem = !winboxAccessData

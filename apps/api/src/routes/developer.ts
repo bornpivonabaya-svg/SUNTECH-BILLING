@@ -279,7 +279,7 @@ export async function developerRoutes(app: FastifyInstance): Promise<void> {
     await enqueueDeliverWebhookEvent({
       webhookEndpointId: endpoint.id,
       eventType: "webhook.test",
-      payload: { message: "This is a test event from MASHUPKGRID ISP.", sentAt: new Date().toISOString() },
+      payload: { message: "This is a test event from Suntech Billing.", sentAt: new Date().toISOString() },
     });
     reply.send(successResponse({ enqueued: true }, request.id));
   });

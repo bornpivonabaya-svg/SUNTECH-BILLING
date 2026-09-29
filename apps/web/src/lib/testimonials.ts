@@ -21,7 +21,7 @@ export const DEFAULT_TESTIMONIALS: TestimonialsConfig = {
   badge: "Proven in the Field",
   title: "Trusted by network engineers across Kenya",
   subtitle:
-    "Hear from network operators who swapped manual Excel spreadsheets and Winbox script pasting for Mashupkgrid ISP.",
+    "Hear from network operators who swapped manual Excel spreadsheets and Winbox script pasting for Suntech Billing.",
   items: [
     {
       id: "kevin-omondi",

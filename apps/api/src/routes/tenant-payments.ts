@@ -209,7 +209,7 @@ export async function tenantPaymentRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /**
-   * Connect this ISP to the MashupHost gateway. Deliberately one-way from the tenant side:
+   * Connect this ISP to the Suntech gateway. Deliberately one-way from the tenant side:
    * disconnecting while the platform may still owe them money, or while payments are in flight,
    * is a platform decision (Super Admin → Payments → Tenants).
    */
@@ -219,11 +219,11 @@ export async function tenantPaymentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const tenantId = tenantOf(request);
       const settings = await getSettlementSettings();
-      if (!settings.gatewayEnabled) throw new ConflictError("The MashupHost payment gateway is not accepting new ISPs right now.");
+      if (!settings.gatewayEnabled) throw new ConflictError("The Suntech payment gateway is not accepting new ISPs right now.");
       const destination = await getActiveDestination(tenantId);
       if (!destination) throw new ValidationError("Add a settlement destination first, so we know where to send your money.");
       const before = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { collectionMode: true } });
-      if (before.collectionMode === "PLATFORM") throw new ConflictError("Already connected to the MashupHost gateway.");
+      if (before.collectionMode === "PLATFORM") throw new ConflictError("Already connected to the Suntech gateway.");
       const after = await prisma.tenant.update({ where: { id: tenantId }, data: { collectionMode: "PLATFORM" }, select: { collectionMode: true } });
       await writeAuditLog({
         tenantId,

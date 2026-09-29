@@ -66,7 +66,7 @@ export default function PaymentSettingsPage() {
                 M
               </span>
               <div>
-                <p className="text-base font-semibold text-white">MashupHost Gateway</p>
+                <p className="text-base font-semibold text-white">Suntech Gateway</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   {data.gateway.connected ? (
                     <StatusBadge status="SETTLED" label="Connected" />
@@ -77,12 +77,12 @@ export default function PaymentSettingsPage() {
                 </div>
                 <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
                   {data.gateway.connected
-                    ? "Your ISP accepts customer payments through MashupHost's payment gateway. You don't need a paybill of your own."
-                    : "Accept M-Pesa payments through MashupHost's gateway — no paybill of your own needed. We collect, deduct the platform fee and settle the rest to you."}
+                    ? "Your ISP accepts customer payments through Suntech's payment gateway. You don't need a paybill of your own."
+                    : "Accept M-Pesa payments through Suntech's gateway — no paybill of your own needed. We collect, deduct the platform fee and settle the rest to you."}
                 </p>
                 {data.gateway.connected && data.gateway.paybill && (
                   <p className="mt-2 text-sm text-slate-300">
-                    Customers pay to paybill <strong className="font-semibold tabular-nums">{data.gateway.paybill}</strong> using their MashupHost
+                    Customers pay to paybill <strong className="font-semibold tabular-nums">{data.gateway.paybill}</strong> using their Suntech
                     account number (shown on each customer and invoice), or by STK push.
                   </p>
                 )}
@@ -138,7 +138,7 @@ export default function PaymentSettingsPage() {
                   : "Verified automatically after the first successful settlement"}
               </p>
               <p className="text-xs text-slate-400">
-                {destination.settlementMethod === "AUTOMATIC" ? "Sent automatically" : "Sent manually by the MashupHost team"}
+                {destination.settlementMethod === "AUTOMATIC" ? "Sent automatically" : "Sent manually by the Suntech team"}
               </p>
             </div>
           </div>
@@ -164,10 +164,10 @@ export default function PaymentSettingsPage() {
       </Panel>
 
       {/* Terms -------------------------------------------------------------------------------- */}
-      <Panel title="Settlement terms" description="Set by MashupHost for all ISPs on the gateway.">
+      <Panel title="Settlement terms" description="Set by Suntech for all ISPs on the gateway.">
         {data ? (
           <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <Term label="Settlement mode" value={data.settlement.mode === "AUTOMATIC" ? "Automatic" : "Reviewed by MashupHost"} />
+            <Term label="Settlement mode" value={data.settlement.mode === "AUTOMATIC" ? "Automatic" : "Reviewed by Suntech"} />
             <Term label="Settlement frequency" value={`${FREQUENCY_LABEL[data.settlement.frequency]} — ${describeSchedule(data.settlement)}`} />
             <Term
               label="Platform fee"
@@ -189,7 +189,7 @@ export default function PaymentSettingsPage() {
       <Dialog
         open={confirmConnect}
         onClose={() => setConfirmConnect(false)}
-        title="Connect the MashupHost gateway?"
+        title="Connect the Suntech gateway?"
         footer={
           <>
             <button type="button" className={buttonClass("ghost")} onClick={() => setConfirmConnect(false)}>
@@ -201,8 +201,8 @@ export default function PaymentSettingsPage() {
           </>
         }
       >
-        <p>From now on, customer M-Pesa payments are collected by MashupHost and credited to your balance after the platform fee.</p>
-        <p>Payments your customers already made to your own paybill are not affected. To switch back later, contact MashupHost support.</p>
+        <p>From now on, customer M-Pesa payments are collected by Suntech and credited to your balance after the platform fee.</p>
+        <p>Payments your customers already made to your own paybill are not affected. To switch back later, contact Suntech support.</p>
         {connect.error && <Alert>{(connect.error as ApiRequestError).message}</Alert>}
       </Dialog>
     </PaymentsWorkspace>

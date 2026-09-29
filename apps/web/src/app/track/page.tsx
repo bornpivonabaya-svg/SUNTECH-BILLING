@@ -148,7 +148,7 @@ function TrackContent() {
                 <p className="mt-0.5 text-sm text-slate-500">Placed {new Date(order.createdAt).toLocaleDateString("en-KE", { dateStyle: "medium" })}</p>
               </div>
               <a
-                href={whatsappLink(`Hello MashupHost, I have a question about order ${order.orderNumber}`)}
+                href={whatsappLink(`Hello Suntech, I have a question about order ${order.orderNumber}`)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="rounded-lg border border-slate-300 px-3.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

@@ -18,7 +18,7 @@ export function AuthShell({
   return (
     <div className="force-light flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-8">
-        <Link href="/" aria-label="MashupHost home" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+        <Link href="/" aria-label="Suntech home" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
           <Logo />
         </Link>
         <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-slate-950">
@@ -37,7 +37,7 @@ export function AuthShell({
       </main>
 
       <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-6 text-xs text-slate-500">
-        <span>© {new Date().getFullYear()} MashupHost</span>
+        <span>© {new Date().getFullYear()} Suntech</span>
         <Link href="/terms" className="hover:text-slate-800">Terms</Link>
         <Link href="/refund-policy" className="hover:text-slate-800">Refunds</Link>
       </footer>

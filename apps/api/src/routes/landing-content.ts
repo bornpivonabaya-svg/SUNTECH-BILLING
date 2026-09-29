@@ -183,12 +183,12 @@ export const DEFAULT_LANDING_CONTENT: LandingContent = {
       a: "Yes. Setup is a single script you paste into your router's terminal, which configures the hotspot, the captive portal, RADIUS authentication and the payment walled garden in one step. There is no proprietary hardware to buy and nothing to replace.",
     },
     {
-      q: "Does MashupHost work with both MikroTik RouterOS v6 and v7?",
+      q: "Does Suntech work with both MikroTik RouterOS v6 and v7?",
       a: "Yes. When you add a router you pick v6 or v7 (or let the script detect it), and the setup script uses the right commands for that version. It talks to the router over MikroTik's standard API. Remote WinBox needs v7, because it runs over WireGuard, which v6 doesn't have.",
     },
     {
       q: "Can I open my router in WinBox remotely, even on a Safaricom or Airtel SIM?",
-      a: "Yes. Each router connects out to MashupHost over its own encrypted WireGuard tunnel, so it doesn't need a public IP or port forwarding and works behind carrier NAT. The dashboard gives you an address to type into WinBox, and you log in with the router's own admin account.",
+      a: "Yes. Each router connects out to Suntech over its own encrypted WireGuard tunnel, so it doesn't need a public IP or port forwarding and works behind carrier NAT. The dashboard gives you an address to type into WinBox, and you log in with the router's own admin account.",
     },
     {
       q: "Can I run hotspot and PPPoE on separate VLANs?",
@@ -212,7 +212,7 @@ export const DEFAULT_LANDING_CONTENT: LandingContent = {
     },
     {
       q: "Can I use my own logo and domain?",
-      a: "Yes. Your logo and colours appear on the dashboard, customer app and captive portal. Type your domain and MashupHost detects who runs its DNS — Namecheap, GoDaddy, Hostinger, Cloudflare, Truehost and others — shows the exact record to add, and switches the domain on by itself once it's in place.",
+      a: "Yes. Your logo and colours appear on the dashboard, customer app and captive portal. Type your domain and Suntech detects who runs its DNS — Namecheap, GoDaddy, Hostinger, Cloudflare, Truehost and others — shows the exact record to add, and switches the domain on by itself once it's in place.",
     },
     {
       q: "Is it available in Kiswahili?",

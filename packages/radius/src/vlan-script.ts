@@ -85,7 +85,7 @@ export function buildVlanServiceScript(input: VlanScriptInput): string {
   const dns = (input.dnsServers ?? []).filter((d) => ipToInt(d) !== null);
   const mtuSet = input.mtu ? ` mtu=${input.mtu}` : "";
 
-  const header = `# MASHUPKGRID ISP — ${input.service === "hotspot" ? "hotspot" : "PPPoE"} on VLAN ${tag} ("${label}") over ${trunk}
+  const header = `# Suntech Billing — ${input.service === "hotspot" ? "hotspot" : "PPPoE"} on VLAN ${tag} ("${label}") over ${trunk}
 # Run the router's main setup script first: RADIUS, the login page, the walled garden and
 # internet NAT come from it, and this VLAN shares them. Safe to run again.
 

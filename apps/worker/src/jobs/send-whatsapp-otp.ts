@@ -13,6 +13,6 @@ export async function handleSendWhatsappOtp(payload: unknown): Promise<void> {
   await sendWhatsAppMessage(
     sock,
     data.phone,
-    `Your MASHUPKGRID ISP verification code is: ${data.code}\n\nThis code expires in 10 minutes. Do not share it with anyone.`
+    `Your Suntech Billing verification code is: ${data.code}\n\nThis code expires in 10 minutes. Do not share it with anyone.`
   );
 }

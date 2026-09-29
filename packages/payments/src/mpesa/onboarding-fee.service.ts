@@ -30,7 +30,7 @@ export async function initiateOnboardingFeeStkPush(
     phone: normalizedPhone,
     amountMinor,
     accountReference: "ONBOARDING",
-    transactionDesc: "MASHUPKGRID ISP onboarding fee",
+    transactionDesc: "Suntech Billing onboarding fee",
     callbackUrl,
   });
 

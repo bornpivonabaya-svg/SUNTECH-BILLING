@@ -71,7 +71,7 @@ export default function TestimonialsManagerPage() {
       company: "Kenya Fiber Systems",
       subscribers: "1,200 Subs",
       quote:
-        "Switching to Mashupkgrid ISP automated our MikroTik PPPoE cutoffs and M-Pesa collections instantly without manual oversight.",
+        "Switching to Suntech Billing automated our MikroTik PPPoE cutoffs and M-Pesa collections instantly without manual oversight.",
       initials: "NO",
       color: "bg-brand-600",
       verified: true,

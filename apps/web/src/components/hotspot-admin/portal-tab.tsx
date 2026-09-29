@@ -174,7 +174,7 @@ export function PortalTab({ tenantSlug }: { tenantSlug: string }) {
               .
             </p>
           </Panel>
-          <Panel title={tr("Design")} description={tr("How the sign-in page looks. MashupHost Clean loads fastest on phones.")}>
+          <Panel title={tr("Design")} description={tr("How the sign-in page looks. Suntech Clean loads fastest on phones.")}>
             <div className="grid gap-3 sm:grid-cols-2">
               {THEME_CATALOG.map((t) => {
                 const active = theme === t.id;

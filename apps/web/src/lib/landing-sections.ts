@@ -25,7 +25,7 @@ export const DEFAULT_LANDING_SECTIONS: LandingSections = {
   network: {
     eyebrow: "For your network team",
     title: "Remote WinBox and VLANs, without the site visit",
-    body: "Each router dials out to MashupHost over its own encrypted tunnel, so you can open it in WinBox from anywhere — even on a SIM behind carrier NAT. Add a VLAN in the dashboard and the router gets its own hotspot or PPPoE server on it, set up for you.",
+    body: "Each router dials out to Suntech over its own encrypted tunnel, so you can open it in WinBox from anywhere — even on a SIM behind carrier NAT. Add a VLAN in the dashboard and the router gets its own hotspot or PPPoE server on it, set up for you.",
     bullets: [
       "WinBox from your office or phone, with no public IP and no port forwarding",
       "Hotspot on one VLAN and PPPoE on another, each running on its own",
@@ -102,7 +102,7 @@ export const DEFAULT_LANDING_SECTIONS: LandingSections = {
 
 
   steps: [
-    { title: "Connect Your Network", body: "Paste one setup script into your MikroTik to link it to MashupHost." },
+    { title: "Connect Your Network", body: "Paste one setup script into your MikroTik to link it to Suntech." },
     { title: "Add Subscribers", body: "Create customer accounts for PPPoE and hotspot users." },
     { title: "Set Packages", body: "Define speeds, prices and billing cycles for what you sell." },
     { title: "Automate Billing", body: "Invoices, reminders and suspensions run on their own." },
@@ -148,7 +148,7 @@ export const DEFAULT_LANDING_SECTIONS: LandingSections = {
   operatorPoints: [
     {
       title: "Your money, your choice",
-      body: "Collect straight into your own Paybill or Till, or let MashupHost collect and settle to you.",
+      body: "Collect straight into your own Paybill or Till, or let Suntech collect and settle to you.",
       icon: "mpesa",
     },
     {

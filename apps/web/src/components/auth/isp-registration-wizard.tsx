@@ -219,7 +219,7 @@ export function IspRegistrationWizard() {
   return (
     <div className="force-light flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-8">
-        <Link href="/" aria-label="MashupHost home" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+        <Link href="/" aria-label="Suntech home" className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
           <Logo />
         </Link>
         <p className="text-sm text-slate-600">
@@ -247,7 +247,7 @@ export function IspRegistrationWizard() {
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">Your address</dt>
                   <dd className="font-mono text-slate-900">
-                    {slug}.{PLATFORM_BASE_DOMAIN || "mashuphost.tech"}
+                    {slug}.{PLATFORM_BASE_DOMAIN || "suntechke.com"}
                   </dd>
                 </div>
                 <div className="mt-2 flex justify-between gap-4">
@@ -396,7 +396,7 @@ export function IspRegistrationWizard() {
                         minLength={3}
                         spellCheck={false}
                       />
-                      <span className="flex items-center rounded-r-md border-l border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">.{PLATFORM_BASE_DOMAIN || "mashuphost.tech"}</span>
+                      <span className="flex items-center rounded-r-md border-l border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">.{PLATFORM_BASE_DOMAIN || "suntechke.com"}</span>
                     </div>
                     <p className={`mt-1.5 text-xs ${slugCheck.state === "ok" ? "text-emerald-700" : slugCheck.state === "taken" ? "text-rose-700" : "text-slate-500"}`} aria-live="polite">
                       {slugCheck.state === "checking" && "Checking…"}
@@ -448,7 +448,7 @@ export function IspRegistrationWizard() {
       </main>
 
       <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-6 text-xs text-slate-500">
-        <span>© {new Date().getFullYear()} MashupHost</span>
+        <span>© {new Date().getFullYear()} Suntech</span>
         <Link href="/terms" className="hover:text-slate-800">
           Terms
         </Link>

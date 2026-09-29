@@ -982,7 +982,7 @@ export default function TenantsPage() {
                 required
               />
               <p className="text-[10px] text-slate-400 mt-1 font-mono">
-                URL: https://{slug || "your-slug"}.{data?.platformBaseDomain ?? "mashuphost.tech"}
+                URL: https://{slug || "your-slug"}.{data?.platformBaseDomain ?? "suntechke.com"}
               </p>
             </div>
             <div>

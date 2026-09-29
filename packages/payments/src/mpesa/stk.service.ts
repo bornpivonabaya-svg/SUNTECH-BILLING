@@ -35,7 +35,7 @@ async function resolveCollectingCredentials(
     const settings = await getSettlementSettings();
     if (!settings.gatewayEnabled) {
       throw new ConflictError(
-        "Online payments are temporarily unavailable — the MashupHost payment gateway is switched off. Please try again later."
+        "Online payments are temporarily unavailable — the Suntech payment gateway is switched off. Please try again later."
       );
     }
   }

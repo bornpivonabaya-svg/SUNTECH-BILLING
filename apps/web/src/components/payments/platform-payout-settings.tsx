@@ -8,7 +8,7 @@ import type { TenantOverview } from "@/components/payments-gateway/types";
 import { formatKes } from "@/components/payments-gateway/kit";
 
 /**
- * "Till / Paybill" option on Getting paid: the MashupHost payment gateway. Its settings — where
+ * "Till / Paybill" option on Getting paid: the Suntech payment gateway. Its settings — where
  * money is sent, requesting a settlement — now live in Payments → Payment Settings, which also
  * supports M-Pesa numbers and bank accounts and keeps an audit trail. This card summarises it.
  */
@@ -21,9 +21,9 @@ export function PlatformPayoutSettings() {
   return (
     <Card className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-slate-900 dark:text-white">MashupHost payment gateway</h2>
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Suntech payment gateway</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          No keys or paybill of your own: MashupHost collects your customers&apos; M-Pesa payments, deducts the platform fee and sends the rest
+          No keys or paybill of your own: Suntech collects your customers&apos; M-Pesa payments, deducts the platform fee and sends the rest
           to your M-Pesa number, till, paybill or bank account.
         </p>
       </div>

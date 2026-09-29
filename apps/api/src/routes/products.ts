@@ -117,7 +117,7 @@ function toPublicOrder(o: StoreOrder, opts: { includeContact?: boolean } = {}) {
 function assertSuperAdmin(request: FastifyRequest) {
   if (!request.user) throw new UnauthorizedError();
   if (request.user.tenantId) {
-    throw new ForbiddenError("Only MashupHost platform admins can change the store catalogue or its orders.");
+    throw new ForbiddenError("Only Suntech platform admins can change the store catalogue or its orders.");
   }
 }
 
@@ -139,7 +139,7 @@ const productFields = {
 
 const createProductSchema = z.object({
   ...productFields,
-  brand: productFields.brand.default("MashupHost"),
+  brand: productFields.brand.default("Suntech"),
   originalPrice: productFields.originalPrice.optional(),
   stock: productFields.stock.default(0),
   badge: productFields.badge.optional(),

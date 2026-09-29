@@ -9,7 +9,7 @@ export default function TermsOfServicePage() {
       title="Terms of Service"
       intro={
         <>
-          Please read these Terms of Service carefully before utilizing the Mashupkgrid ISP platform, MikroTik API provisioning, FreeRADIUS accounting, and automated M-Pesa billing integrations.
+          Please read these Terms of Service carefully before utilizing the Suntech Billing platform, MikroTik API provisioning, FreeRADIUS accounting, and automated M-Pesa billing integrations.
         </>
       }
       notes={["Jurisdiction: Republic of Kenya","Regulator: Communications Authority (CA)","Compliance: Kenya Data Protection Act 2019"]}
@@ -18,7 +18,7 @@ export default function TermsOfServicePage() {
           title: "Acceptance & Service Scope",
           body: (
             <>
-              By creating an account, registering a tenant slug, connecting a MikroTik RouterOS device, or initiating subscriber billing on Mashupkgrid ISP (&quot;the Platform&quot;), you agree to be bound by these Terms. The platform provides software-as-a-service (SaaS) management tools for Internet Service Providers (ISPs), Wireless ISPs (WISPs), public hotspot venues, and enterprise carriers.
+              By creating an account, registering a tenant slug, connecting a MikroTik RouterOS device, or initiating subscriber billing on Suntech Billing (&quot;the Platform&quot;), you agree to be bound by these Terms. The platform provides software-as-a-service (SaaS) management tools for Internet Service Providers (ISPs), Wireless ISPs (WISPs), public hotspot venues, and enterprise carriers.
             </>
           ),
         },
@@ -42,7 +42,7 @@ export default function TermsOfServicePage() {
           title: "Acceptable Use & Regulatory Compliance",
           body: (
             <>
-              Operators agree not to utilize Mashupkgrid ISP to facilitate unlawful telecommunications activities, unauthorized lawful intercept bypasses, malicious denial-of-service (DDoS) reflection, or fraudulent SIM-box routing. Operators must maintain compliance with Communications Authority of Kenya (CA) guidelines and local regulatory licensing.
+              Operators agree not to utilize Suntech Billing to facilitate unlawful telecommunications activities, unauthorized lawful intercept bypasses, malicious denial-of-service (DDoS) reflection, or fraudulent SIM-box routing. Operators must maintain compliance with Communications Authority of Kenya (CA) guidelines and local regulatory licensing.
             </>
           ),
         },

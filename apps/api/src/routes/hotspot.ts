@@ -839,7 +839,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
 
   /**
    * Serves the downloadable 1-line Anti-VPN & Tunnel Shield RouterOS script:
-   * /tool fetch url="https://api.mashuphost.tech/api/v1/hotspot/<tenantSlug>/anti-vpn.rsc" dst-path=anti-vpn.rsc; :delay 2s; /import anti-vpn.rsc;
+   * /tool fetch url="https://isp.suntechke.com/api/v1/hotspot/<tenantSlug>/anti-vpn.rsc" dst-path=anti-vpn.rsc; :delay 2s; /import anti-vpn.rsc;
    */
   app.get(
     "/:tenantSlug/anti-vpn.rsc",
@@ -848,7 +848,7 @@ export async function hotspotRoutes(app: FastifyInstance): Promise<void> {
       const { tenantSlug } = tenantParamsSchema.parse(request.params);
       await resolveTenantBySlug(tenantSlug);
 
-      const rsc = `# MASHUPKGRID ISP — Bulletproof Anti-VPN & Tunnel Shield
+      const rsc = `# Suntech Billing — Bulletproof Anti-VPN & Tunnel Shield
 /ip firewall filter remove [find comment~"MASHUPKGRID ANTI-TUNNEL"]
 /ip firewall filter remove [find comment~"MASHUPKGRID ANTI-VPN"]
 /ip firewall nat remove [find comment~"MASHUPKGRID ANTI-VPN"]

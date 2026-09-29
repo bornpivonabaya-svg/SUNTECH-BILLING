@@ -63,7 +63,7 @@ const envSchema = z.object({
   /** Base URL of apps/web, used server-side (worker) to build links inside transactional emails. */
   APP_WEB_URL: z.string().default("http://localhost:3000"),
   /** Dedicated captive portal hostname reached directly without CDN proxying for MikroTik hotspot sign-in */
-  APP_PORTAL_URL: z.string().default("https://captive.mashuphost.tech"),
+  APP_PORTAL_URL: z.string().default("https://captive.suntechke.com"),
   /** The domain every tenant's automatic subdomain is built under (`{tenant.slug}.{this}`) —
    *  a placeholder until a real domain is registered and pointed at this deployment; actually
    *  making `{slug}.{this}` resolve to the tenant's dashboard is a separate, not-yet-built
@@ -163,7 +163,7 @@ const envSchema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional().default(""),
   VAPID_PRIVATE_KEY: z.string().optional().default(""),
   /** Contact the push services can reach if the alerts misbehave: a mailto: or https: URL. */
-  VAPID_SUBJECT: z.string().optional().default("mailto:alerts@mashuphost.tech"),
+  VAPID_SUBJECT: z.string().optional().default("mailto:alerts@suntechke.com"),
 
   // M-Pesa credentials are configured per-tenant, encrypted, in the PaymentProviderConfig
   // table (docs/architecture/10-phase3-plan.md) — set via the admin UI/API, not here. These

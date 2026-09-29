@@ -42,7 +42,7 @@ export function CollectionsChart({ series, loading }: { series: DailyPoint[] | u
     return (
       <div className="flex h-56 flex-col items-center justify-center rounded-md border border-dashed border-obsidian-800 text-center">
         <p className="text-sm font-medium text-slate-200">No collections in the last 30 days</p>
-        <p className="mt-1 text-sm text-slate-400">Payments collected through the MashupHost gateway will show here.</p>
+        <p className="mt-1 text-sm text-slate-400">Payments collected through the Suntech gateway will show here.</p>
       </div>
     );
   }

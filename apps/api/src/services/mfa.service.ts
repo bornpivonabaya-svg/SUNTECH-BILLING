@@ -151,9 +151,9 @@ export interface SetupStart {
 }
 
 async function issuerFor(user: Pick<User, "tenantId">): Promise<string> {
-  if (!user.tenantId) return "MashupHost";
+  if (!user.tenantId) return "Suntech";
   const t = await prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { name: true } });
-  return t?.name ?? "MashupHost";
+  return t?.name ?? "Suntech";
 }
 
 /** Starts setup: an authenticator secret (kept, encrypted, until confirmed) or an SMS code. */

@@ -164,7 +164,7 @@ async function tenantCardGateways(tenantId: string): Promise<CardGateway[]> {
 }
 
 function portalHostname(): string {
-  return env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech";
+  return env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.suntechke.com";
 }
 
 /** What an unpaid device on this ISP's routers may reach; the heartbeat keeps routers to it. */
@@ -322,7 +322,7 @@ export function parseAccessPointReport(raw: string): ConnectedAccessPoint[] {
  *  route — with its output in mkg-setup.txt on the router. */
 function setupFetchCommand(provisionToken: string): string {
   const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
-  return `/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in MashupHost within a minute."`;
+  return `/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in Suntech within a minute."`;
 }
 
 export async function routerRoutes(app: FastifyInstance): Promise<void> {
@@ -454,7 +454,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         serverPort: env.WIREGUARD_LISTEN_PORT || 51820,
         vpnIp,
         loginTemplateUrl,
-        portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech",
+        portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.suntechke.com",
         portalDomains: await getTenantPortalDomains(tenantId),
         extraWalledGardenHosts: await listWalledGardenHostsFor(tenantId),
         cardGateways: await tenantCardGateways(tenantId),
@@ -995,7 +995,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
   // was generated per-router and is only ever known to whoever pasted the script. -------------
   /**
    * 1-Line Remote Provisioning Fetcher:
-   * /tool fetch url="https://api.mashuphost.tech/api/v1/routers/provision/<token>/setup.rsc" dst-path=setup.rsc; :delay 2s; /import setup.rsc;
+   * /tool fetch url="https://isp.suntechke.com/api/v1/routers/provision/<token>/setup.rsc" dst-path=setup.rsc; :delay 2s; /import setup.rsc;
    * Serves the generated .rsc script dynamically to the MikroTik router.
    */
   app.get("/provision/:token/setup.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
@@ -1045,7 +1045,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       serverPort: env.WIREGUARD_LISTEN_PORT || 51820,
       vpnIp,
       loginTemplateUrl,
-      portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.mashuphost.tech",
+      portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.suntechke.com",
       portalDomains: await getTenantPortalDomains(router.tenantId),
       extraWalledGardenHosts: await listWalledGardenHostsFor(router.tenantId),
       cardGateways: await tenantCardGateways(router.tenantId),

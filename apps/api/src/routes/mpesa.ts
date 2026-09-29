@@ -547,7 +547,7 @@ export async function mpesaRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // --- The MashupHost Payment Gateway's own paybill. Customers of every tenant on PLATFORM
+  // --- The Suntech Payment Gateway's own paybill. Customers of every tenant on PLATFORM
   // collection pay here, with a payment reference (MH…) as the account number; the reference is
   // what decides which tenant the money belongs to. -----------------------------------------------
 

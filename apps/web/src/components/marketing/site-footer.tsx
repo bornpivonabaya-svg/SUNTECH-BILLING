@@ -108,7 +108,7 @@ export function SiteFooter({
         </div>
 
         <div className="mt-12 flex flex-col gap-2 border-t border-slate-200 pt-6 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>© {year} MashupHost. All rights reserved.</p>
+          <p>© {year} Suntech. All rights reserved.</p>
           <p>Made in Nairobi, Kenya</p>
         </div>
       </div>

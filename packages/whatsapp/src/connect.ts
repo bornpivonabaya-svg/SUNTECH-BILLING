@@ -49,7 +49,7 @@ async function main() {
         return;
       }
       if (testMessageSent) return; // already delivered on an earlier "open" — don't resend on every reconnect
-      sendWhatsAppMessage(sock, testRecipient, "✅ MASHUPKGRID ISP WhatsApp bot is connected.")
+      sendWhatsAppMessage(sock, testRecipient, "✅ Suntech Billing WhatsApp bot is connected.")
         .then(() => {
           testMessageSent = true;
           console.log(`[whatsapp] test message sent to ${testRecipient}`);

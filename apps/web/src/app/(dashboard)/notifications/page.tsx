@@ -14,7 +14,7 @@ export default function NotificationsPage() {
     <div className="max-w-3xl space-y-6">
       <PageHeader
         title="Notifications"
-        description="Messages from the MashupHost team: maintenance, new features and anything that needs your attention."
+        description="Messages from the Suntech team: maintenance, new features and anything that needs your attention."
         actions={
           unread > 0 && (
             <button type="button" className={darkButton("secondary", "sm")} onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
@@ -40,7 +40,7 @@ export default function NotificationsPage() {
           <p className="px-5 py-8 text-sm text-slate-400">Loading…</p>
         ) : items.length === 0 ? (
           <EmptyState title={filter === "unread" ? "You're all caught up" : "No notifications yet"}>
-            {filter === "unread" ? "There's nothing new to read." : "Messages from the MashupHost team will appear here."}
+            {filter === "unread" ? "There's nothing new to read." : "Messages from the Suntech team will appear here."}
           </EmptyState>
         ) : (
           <ul className="divide-y divide-obsidian-800">

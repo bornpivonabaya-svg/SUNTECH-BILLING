@@ -19,7 +19,7 @@ export function getApiBaseUrl(): string {
         // fallback to dynamic domain resolution
       }
     }
-    // 4. Any public domain (mashuphost.tech, app.mashuphost.tech, mash.mashuphost.tech) -> api.mashuphost.tech
+    // 4. Any public domain (mashuphost.tech, app.mashuphost.tech, mash.mashuphost.tech) -> isp.suntechke.com
     const parts = window.location.hostname.split(".");
     const baseDomain = parts.slice(-2).join(".");
     return `${window.location.protocol}//api.${baseDomain}`;

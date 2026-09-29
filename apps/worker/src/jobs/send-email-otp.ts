@@ -4,7 +4,7 @@ import { sendEmail } from "../lib/email.js";
 export async function handleSendEmailOtp(payload: unknown): Promise<void> {
   const data = sendEmailOtpJobSchema.parse(payload);
 
-  const subject = `Your MASHUPKGRID ISP Verification Code: ${data.code}`;
+  const subject = `Your Suntech Billing Verification Code: ${data.code}`;
   const text = [
     `Your verification code is: ${data.code}`,
     "",

@@ -9,7 +9,7 @@ const systemLookup: Lookup = async (host) => (await dnsLookup(host, { all: true 
  *  2. winbox.<the platform's domain> (winbox.mashuphost.tech), when it already points at the same
  *     server as the API — true wherever the domain has the DNS-only "*" record the deployment
  *     guide sets up, so nobody adds anything;
- *  3. the API's own name (api.mashuphost.tech, DNS-only, straight to this server);
+ *  3. the API's own name (isp.suntechke.com, DNS-only, straight to this server);
  *  4. the fallback (the VPN endpoint).
  * Never the bare domain: it sits behind Cloudflare's proxy, which carries web traffic only. The
  * answer is cached for 10 minutes.

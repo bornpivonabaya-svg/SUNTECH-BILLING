@@ -100,7 +100,7 @@ export default function PlatformFeesPage() {
     <PaymentsWorkspace
       tabs={PLATFORM_TABS}
       title="Fees & settlement"
-      description="What MashupHost charges ISPs on the gateway, and how and when their money is sent. Changes apply to new payments only — every past transaction keeps the fee it was charged."
+      description="What Suntech charges ISPs on the gateway, and how and when their money is sent. Changes apply to new payments only — every past transaction keeps the fee it was charged."
     >
       {settings.error && <Alert title="Couldn't load settings">{(settings.error as Error).message}</Alert>}
       <form onSubmit={submit} className="space-y-6" noValidate>

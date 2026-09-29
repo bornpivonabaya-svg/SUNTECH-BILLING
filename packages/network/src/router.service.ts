@@ -672,7 +672,7 @@ function hostOf(url: string): string {
 
 /** The portal and the API behind it: reachable even for app-only customers, so they can buy more. */
 export function appFilterPortalHosts(): string[] {
-  return [...new Set([hostOf(env.APP_PORTAL_URL || "https://captive.mashuphost.tech"), hostOf(routerFacingApiBase())].filter(Boolean))];
+  return [...new Set([hostOf(env.APP_PORTAL_URL || "https://captive.suntechke.com"), hostOf(routerFacingApiBase())].filter(Boolean))];
 }
 
 const RECONCILE_INTERVAL_MS = 10 * 60_000;
@@ -716,7 +716,7 @@ export async function reconcileRouterProvisioning(routerId: string, options: { f
       radiusSecret: decryptAtRest(router.passwordEncrypted, env.ENCRYPTION_KEY),
       retiredRadiusHosts: radiusHost === LEGACY_PLATFORM_ADDRESS ? [] : [LEGACY_PLATFORM_ADDRESS],
       walledGardenHosts: [
-        hostOf(env.APP_PORTAL_URL || "https://captive.mashuphost.tech"),
+        hostOf(env.APP_PORTAL_URL || "https://captive.suntechke.com"),
         hostOf(routerFacingApiBase()),
         // What a super admin and this ISP allowed from the dashboard — this pass is how a router
         // that is already online picks up a host added after it was linked.

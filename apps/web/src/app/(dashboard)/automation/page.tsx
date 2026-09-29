@@ -172,7 +172,7 @@ export default function AutomationPage() {
         <Notice tone="bad">
           The background worker is not running, so nothing on this page is happening: no invoices, no reminders, no suspensions or
           reactivations, and router status is frozen.{" "}
-          {isPlatform ? "Check the worker container and its Redis connection." : "MashupHost has been alerted; customers already online are unaffected."}
+          {isPlatform ? "Check the worker container and its Redis connection." : "Suntech has been alerted; customers already online are unaffected."}
         </Notice>
       )}
 

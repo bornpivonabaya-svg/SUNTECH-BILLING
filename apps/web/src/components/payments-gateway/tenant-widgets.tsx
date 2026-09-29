@@ -120,7 +120,7 @@ export function DestinationForm({ current, onDone }: { current: Destination | nu
       </div>
 
       {type === "BANK_ACCOUNT" && (
-        <Alert tone="blue">Bank settlements are made by the MashupHost team and marked settled only once the transfer reference is recorded.</Alert>
+        <Alert tone="blue">Bank settlements are made by the Suntech team and marked settled only once the transfer reference is recorded.</Alert>
       )}
       {save.error && <Alert title="Couldn't save this destination">{(save.error as ApiRequestError).message}</Alert>}
 

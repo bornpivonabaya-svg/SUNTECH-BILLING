@@ -18,7 +18,7 @@ export default function AgePolicyPage() {
           title: "Minimum Age Eligibility (18+)",
           body: (
             <>
-              To register an operator console account, sign a telecommunications broadband subscription agreement, or initiate recurring M-Pesa billing on Mashupkgrid ISP, users must be at least 18 years of age (the legal age of majority in the Republic of Kenya) or have explicit contractual authorization from a parent or legal guardian.
+              To register an operator console account, sign a telecommunications broadband subscription agreement, or initiate recurring M-Pesa billing on Suntech Billing, users must be at least 18 years of age (the legal age of majority in the Republic of Kenya) or have explicit contractual authorization from a parent or legal guardian.
             </>
           ),
         },
@@ -34,7 +34,7 @@ export default function AgePolicyPage() {
           title: "Parental Controls & Family Filtering",
           body: (
             <>
-              Mashupkgrid ISP enables operators to provision family-safe DNS profiles (such as Cloudflare 1.1.1.3 Family Protection or CleanBrowsing Adult Filter) directly through MikroTik DHCP server and RADIUS attribute configuration. Parents and guardians may request family-safe speed profiles on their residential PPPoE line.
+              Suntech Billing enables operators to provision family-safe DNS profiles (such as Cloudflare 1.1.1.3 Family Protection or CleanBrowsing Adult Filter) directly through MikroTik DHCP server and RADIUS attribute configuration. Parents and guardians may request family-safe speed profiles on their residential PPPoE line.
             </>
           ),
         },

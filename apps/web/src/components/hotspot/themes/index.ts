@@ -23,7 +23,7 @@ export {
 export const THEME_CATALOG: ThemeMeta[] = [
   {
     id: "mashuphost-clean",
-    name: "MashupHost Clean",
+    name: "Suntech Clean",
     category: "Recommended",
     description: "Fast, light and clear. Loads quickly on any phone, uses your logo and brand colour, and puts packages, voucher login and help on one screen.",
     badgeColor: "bg-emerald-600 text-white",

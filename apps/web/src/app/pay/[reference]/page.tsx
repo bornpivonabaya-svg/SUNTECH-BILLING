@@ -33,7 +33,7 @@ const POLL_MS = 3_000;
 const GIVE_UP_MS = 120_000;
 
 /**
- * Public "pay your internet bill" page for a MashupHost payment reference. The browser never
+ * Public "pay your internet bill" page for a Suntech payment reference. The browser never
  * decides that a payment succeeded: it only shows what the server recorded from M-Pesa's own
  * callback, polled every few seconds.
  */
@@ -120,7 +120,7 @@ export default function PayPage() {
   return (
     <div className="force-light flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
-        <Link href="/" aria-label="MashupHost home">
+        <Link href="/" aria-label="Suntech home">
           <Logo />
         </Link>
         <span className="text-xs text-slate-500">Secure M-Pesa checkout</span>
@@ -270,9 +270,9 @@ export default function PayPage() {
 
           <p className="mt-6 text-center text-xs text-slate-500">
             {checkout?.collectedBy === "MASHUPHOST"
-              ? `Payments to ${checkout.isp} are processed by MashupHost.`
-              : "Powered by MashupHost."}{" "}
-            MashupHost will never ask for your M-Pesa PIN outside the M-Pesa prompt on your phone.
+              ? `Payments to ${checkout.isp} are processed by Suntech.`
+              : "Powered by Suntech."}{" "}
+            Suntech will never ask for your M-Pesa PIN outside the M-Pesa prompt on your phone.
           </p>
         </div>
       </main>

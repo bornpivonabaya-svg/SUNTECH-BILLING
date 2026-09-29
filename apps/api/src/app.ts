@@ -102,7 +102,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.send({
       success: true,
       data: {
-        name: "MASHUPKGRID ISP Platform API",
+        name: "Suntech Billing Platform API",
         status: "OPERATIONAL",
         version: "1.0.0",
       },

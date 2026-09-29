@@ -147,7 +147,7 @@ export function TransactionsView({
           {error && <ErrorRow cols={cols + 1} error={error} onRetry={() => void refetch()} />}
           {data && data.items.length === 0 && (
             <EmptyRow cols={cols + 1} title="No transactions yet">
-              {compact ? "Payments collected through the MashupHost gateway appear here." : "Nothing matches these filters."}
+              {compact ? "Payments collected through the Suntech gateway appear here." : "Nothing matches these filters."}
             </EmptyRow>
           )}
           {data?.items.map((t) => (

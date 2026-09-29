@@ -288,7 +288,7 @@ async function main() {
     );
   }
 
-  console.log("[worker] MASHUPKGRID ISP worker started. Queues:", Object.values(QUEUE_NAMES).join(", "));
+  console.log("[worker] Suntech Billing worker started. Queues:", Object.values(QUEUE_NAMES).join(", "));
 
   const radiusServer = env.ENABLE_EMBEDDED_RADIUS_SERVER
     ? startRadiusServer({ authPort: env.RADIUS_AUTH_PORT, acctPort: env.RADIUS_ACCT_PORT })

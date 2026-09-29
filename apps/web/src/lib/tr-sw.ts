@@ -150,7 +150,7 @@ export const SW: Record<string, string> = {
   "Hotspot sections": "Sehemu za hotspot",
   "Hours a new ticket may wait for its first reply before it shows as overdue on the Tickets page.": "Saa ambazo tiketi mpya inaweza kusubiri jibu la kwanza kabla ya kuonekana imechelewa kwenye ukurasa wa Tiketi.",
   "How many": "Ngapi",
-  "How the sign-in page looks. MashupHost Clean loads fastest on phones.": "Jinsi ukurasa wa kuingia unavyoonekana. MashupHost Clean hufunguka haraka zaidi kwenye simu.",
+  "How the sign-in page looks. Suntech Clean loads fastest on phones.": "Jinsi ukurasa wa kuingia unavyoonekana. Suntech Clean hufunguka haraka zaidi kwenye simu.",
   "ISPs": "Watoa huduma",
   "ISPs on the platform": "Watoa huduma kwenye jukwaa",
   "If you run in one area only, you do not need any.": "Ukifanya kazi eneo moja tu, huhitaji tawi lolote.",

@@ -65,7 +65,7 @@ function fit(font: PDFFont, value: string, size: number, maxWidth: number): stri
 async function newDocument(title: string): Promise<{ doc: PDFDocument; pen: Pen }> {
   const doc = await PDFDocument.create();
   doc.setTitle(safe(title));
-  doc.setCreator("MashupHost");
+  doc.setCreator("Suntech");
   const page = doc.addPage([A4.width, A4.height]);
   const pen = { page, regular: await doc.embedFont(StandardFonts.Helvetica), bold: await doc.embedFont(StandardFonts.HelveticaBold) };
   return { doc, pen };

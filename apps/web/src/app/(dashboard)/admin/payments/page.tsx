@@ -32,10 +32,10 @@ export default function PlatformPaymentsOverviewPage() {
       description={
         data ? (
           <span className="inline-flex flex-wrap items-center gap-2">
-            Money collected through the MashupHost gateway on behalf of ISPs. <EnvironmentBadge environment={data.environment} />
+            Money collected through the Suntech gateway on behalf of ISPs. <EnvironmentBadge environment={data.environment} />
           </span>
         ) : (
-          "Money collected through the MashupHost gateway on behalf of ISPs."
+          "Money collected through the Suntech gateway on behalf of ISPs."
         )
       }
     >

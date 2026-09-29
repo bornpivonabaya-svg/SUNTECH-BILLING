@@ -187,7 +187,7 @@ export function antiTetheringRules(globalOn: boolean): string[] {
 
 /** Standalone script to install or refresh the per-app package filter on an existing router. */
 export function buildSocialFirewallOnlyScript(opts: { portalHosts?: string[] } = {}): string {
-  return `# MASHUPKGRID ISP — per-app packages (TikTok only, YouTube only, …)
+  return `# Suntech Billing — per-app packages (TikTok only, YouTube only, …)
 # Paste this into your MikroTik terminal:
 
 ${buildAppFilterSection({ portalHosts: opts.portalHosts })}
@@ -369,11 +369,11 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
     options.pppoeGatewayIp,
     options.pppoePoolRange
   );
-  const loginTemplateUrl = options.loginTemplateUrl || "https://api.mashuphost.tech/api/v1/hotspot/demo-isp/mikrotik-login-template";
+  const loginTemplateUrl = options.loginTemplateUrl || "https://isp.suntechke.com/api/v1/hotspot/demo-isp/mikrotik-login-template";
   // The "you're online" page shown after a successful sign-in, served next to the login page.
   const aloginTemplateUrl = aloginUrlFor(loginTemplateUrl);
   const apiHost = hostFromUrl(loginTemplateUrl);
-  const portalHost = options.portalHost ? hostFromUrl(options.portalHost) : "captive.mashuphost.tech";
+  const portalHost = options.portalHost ? hostFromUrl(options.portalHost) : "captive.suntechke.com";
   // App-only customers must still reach the portal (to buy full internet) and the API behind it.
   const appFilterSection =
     options.appFilter === false
@@ -436,7 +436,7 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
 :put "Direct LAN active on ${lanPort} (192.168.99.1/24) — No Voucher Required"`
     : "";
 
-  const minimalProvisioningScript = `# MASHUPKGRID ISP - safe baseline setup for "${safeName}"
+  const minimalProvisioningScript = `# Suntech Billing - safe baseline setup for "${safeName}"
 # The router must already have WAN internet access for this file to download.
 ${versionSection}
 :do {/tool fetch url="${callbackUrl}" http-method=post keep-result=no} on-error={}
@@ -759,7 +759,7 @@ export function buildHeartbeatScript(
  * router's RADIUS counters (requests, accepts, rejects, timeouts). Left out for RouterOS 6, whose report must stay under
  * the 4 KB its fetch returns.
  */
-const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find dst-host~"mashuphost"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :do {:local dir [/ip hotspot profile get [/ip hotspot get [find disabled=no] profile] html-directory]; :set c ($c . ";dir=" . $dir . ";lsize=" . [/file get [find name=($dir . "/login.html")] size])} on-error={}; :do {:local m [:parse ":return [/radius monitor 0 once as-value]"]; :local r [$m]; :set c ($c . ";rreq=" . ($r->"requests") . ";racc=" . ($r->"accepts") . ";rrej=" . ($r->"rejects") . ";rto=" . ($r->"timeouts"))} on-error={}; :set d ($d . "&hs=" . $c)} on-error={}`;
+const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find comment="MASHUPKGRID"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :do {:local dir [/ip hotspot profile get [/ip hotspot get [find disabled=no] profile] html-directory]; :set c ($c . ";dir=" . $dir . ";lsize=" . [/file get [find name=($dir . "/login.html")] size])} on-error={}; :do {:local m [:parse ":return [/radius monitor 0 once as-value]"]; :local r [$m]; :set c ($c . ";rreq=" . ($r->"requests") . ";racc=" . ($r->"accepts") . ";rrej=" . ($r->"rejects") . ";rto=" . ($r->"timeouts"))} on-error={}; :set d ($d . "&hs=" . $c)} on-error={}`;
 
 /** In the current "you're online" page (hotspot/alogin.html). A router whose copy lacks it has an
  *  older page and downloads the new one on its next report; bump it when that page changes. */
@@ -891,7 +891,7 @@ export function wrapTopLevelCommands(script: string): string {
  *  (`http-data=`), not a query parameter — a WireGuard public key is standard base64 and would
  *  need URL-encoding RouterOS's scripting language has no built-in way to do. */
 export function buildMikrotikVpnStartScript(router: Router, callbackUrl: string, listenPort = 51820): string {
-  return `# MASHUPKGRID ISP — remote access (WireGuard) setup, step 1 of 2, for router "${sanitizeForScript(router.name)}"
+  return `# Suntech Billing — remote access (WireGuard) setup, step 1 of 2, for router "${sanitizeForScript(router.name)}"
 # Requires RouterOS v7+ (WireGuard has no v6 equivalent). Paste into the router's terminal, run it.
 
 {
@@ -933,7 +933,7 @@ export function buildMikrotikVpnCompleteScript(input: VpnCompleteScriptInput): s
   const serverPubKey = input.serverPublicKey || "";
   const tunnelSubnet = input.tunnelSubnetCidr || "10.90.0.0/16";
 
-  return `# MASHUPKGRID ISP — remote access (WireGuard) setup, step 2 of 2
+  return `# Suntech Billing — remote access (WireGuard) setup, step 2 of 2
 # Paste into the router's terminal, run it. This finishes the tunnel — the platform can then
 # reach this router at ${input.assignedVpnIp} regardless of its real network location.
 
@@ -1002,11 +1002,11 @@ export function buildMikrotikWinboxScript(
 ): string {
   const safeName = sanitizeForScript(routerName);
   const sources = managementSources(options);
-  return `# MASHUPKGRID ISP - WinBox access for "${safeName}"
-# Allows WinBox (8291) from the MashupHost server, its VPN and this router's LAN only.
+  return `# Suntech Billing - WinBox access for "${safeName}"
+# Allows WinBox (8291) from the Suntech server, its VPN and this router's LAN only.
 ${buildManagementAccessSection(sources, options.apiPort ?? 8728, options.useTls ?? false)}
 :put "WinBox is reachable from: ${sources.join(", ")}"
-:put "Connect remotely through the address shown on the MashupHost Routers page."
+:put "Connect remotely through the address shown on the Suntech Routers page."
 `;
 }
 

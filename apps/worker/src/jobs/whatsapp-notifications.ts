@@ -67,7 +67,7 @@ export async function handleSendWhatsappTenantWelcome(payload: unknown): Promise
       socket,
       data.phone,
       [
-        `Hi ${data.ownerName}, thanks for registering *${data.companyName}* on MASHUPKGRID ISP.`,
+        `Hi ${data.ownerName}, thanks for registering *${data.companyName}* on Suntech Billing.`,
         "",
         "Your application is with our team for approval. You will get a message here and by email the moment it is approved, with your sign-in link.",
         "",
@@ -81,7 +81,7 @@ export async function handleSendWhatsappTenantWelcome(payload: unknown): Promise
       socket,
       data.phone,
       [
-        `Hi ${data.ownerName}, we could not approve *${data.companyName}* on MASHUPKGRID ISP.`,
+        `Hi ${data.ownerName}, we could not approve *${data.companyName}* on Suntech Billing.`,
         ...(data.reason ? ["", `Reason: ${data.reason}`] : []),
         "",
         "Reply to this message if you think this is a mistake or want to reapply.",
@@ -93,7 +93,7 @@ export async function handleSendWhatsappTenantWelcome(payload: unknown): Promise
   const message = [
     `🎉 Welcome aboard, ${data.ownerName}!`,
     "",
-    `*${data.companyName}* has been approved and is now live on MASHUPKGRID ISP.`,
+    `*${data.companyName}* has been approved and is now live on Suntech Billing.`,
     "",
     `👤 Username: ${data.username}`,
     `🔗 Your dashboard: ${data.dashboardUrl}`,

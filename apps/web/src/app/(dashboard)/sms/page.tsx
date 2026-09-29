@@ -26,7 +26,7 @@ export default function SmsGatewayPage() {
   const [unlocked, setUnlocked] = useState({ username: false, apiKey: false });
 
   const [testPhone, setTestPhone] = useState("");
-  const [testMessage, setTestMessage] = useState("This is a test message from MASHUPKGRID ISP.");
+  const [testMessage, setTestMessage] = useState("This is a test message from Suntech Billing.");
   const [testResult, setTestResult] = useState<string | null>(null);
 
   const { data: status } = useQuery({

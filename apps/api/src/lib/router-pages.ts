@@ -171,7 +171,7 @@ export function pageSize(html: string): number {
 
 /** Where the sign-in page sends phones: the web app's captive portal. */
 export function loginPortalBase(): string {
-  return (env as { APP_PORTAL_URL?: string }).APP_PORTAL_URL || "https://captive.mashuphost.tech";
+  return (env as { APP_PORTAL_URL?: string }).APP_PORTAL_URL || "https://captive.suntechke.com";
 }
 
 /** Exact byte sizes of the two pages an ISP's routers download, so the router's report can spot a

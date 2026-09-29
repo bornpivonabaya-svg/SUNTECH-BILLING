@@ -48,7 +48,7 @@ export function generateRevenueCsv(data: RevenueCsvReportData): string {
   const lines: string[] = [];
 
   // Header metadata block
-  lines.push(`${escapeCsvCell("MASHUPKGRID ISP — OFFICIAL REVENUE & FINANCIAL REPORT")}`);
+  lines.push(`${escapeCsvCell("SUNTECH BILLING — OFFICIAL REVENUE & FINANCIAL REPORT")}`);
   lines.push(`${escapeCsvCell("ISP / Tenant")},${escapeCsvCell(data.tenantName)}`);
   lines.push(`${escapeCsvCell("Reporting Period")},${escapeCsvCell(data.periodLabel)}`);
   lines.push(`${escapeCsvCell("Stamped Generation Date")},${escapeCsvCell(data.stampedAt)}`);
@@ -126,7 +126,7 @@ export function generateClientsCsv(data: ClientsCsvReportData): string {
   const lines: string[] = [];
 
   // Header metadata block
-  lines.push(`${escapeCsvCell("MASHUPKGRID ISP — CLIENTS JOINED & SPENDING REPORT")}`);
+  lines.push(`${escapeCsvCell("Suntech Billing — CLIENTS JOINED & SPENDING REPORT")}`);
   lines.push(`${escapeCsvCell("ISP / Tenant")},${escapeCsvCell(data.tenantName)}`);
   lines.push(`${escapeCsvCell("Stamped Generation Date")},${escapeCsvCell(data.stampedAt)}`);
   lines.push(`${escapeCsvCell("Official Stamp Hash")},${escapeCsvCell(data.stampHash)}`);

@@ -159,10 +159,10 @@ export default function DonatePage() {
 
       <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         <div className="max-w-2xl">
-          <p className="text-sm font-medium text-brand-600">Support MashupHost</p>
+          <p className="text-sm font-medium text-brand-600">Support Suntech</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Buy the team a coffee</h1>
           <p className="mt-4 text-base leading-7 text-slate-600">
-            MashupHost is built in Kenya for ISPs and hotspot owners. If it has saved you time or made you money, a tip helps pay for servers, SMS and
+            Suntech is built in Kenya for ISPs and hotspot owners. If it has saved you time or made you money, a tip helps pay for servers, SMS and
             test routers, and keeps new features coming. Every shilling is appreciated.
           </p>
         </div>
@@ -308,7 +308,7 @@ export default function DonatePage() {
                 </p>
                 <p className="mt-3 text-xl font-semibold text-slate-950">Thank you{name.trim() ? `, ${name.trim()}` : ""}!</p>
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-600">
-                  M-Pesa confirmed your {ksh(finalAmount)}. It genuinely helps, and it means a lot to know MashupHost is useful to you.
+                  M-Pesa confirmed your {ksh(finalAmount)}. It genuinely helps, and it means a lot to know Suntech is useful to you.
                 </p>
                 <button
                   type="button"

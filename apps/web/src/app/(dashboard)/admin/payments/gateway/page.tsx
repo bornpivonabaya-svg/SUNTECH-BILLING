@@ -156,7 +156,7 @@ export default function PlatformGatewayPage() {
     <PaymentsWorkspace
       tabs={PLATFORM_TABS}
       title="Payment Gateway"
-      description="The MashupHost paybill that collects for ISPs without a gateway of their own, and the credentials that pay them out. Secrets are stored encrypted and are never shown again after saving."
+      description="The Suntech paybill that collects for ISPs without a gateway of their own, and the credentials that pay them out. Secrets are stored encrypted and are never shown again after saving."
     >
       {gateway.error && <Alert title="Couldn't load the gateway">{(gateway.error as Error).message}</Alert>}
 
@@ -172,7 +172,7 @@ export default function PlatformGatewayPage() {
               </div>
               <p className="mt-2 max-w-2xl text-sm text-slate-400">
                 {g.gatewayEnabled
-                  ? "ISPs connected to the gateway can take payments through the MashupHost paybill."
+                  ? "ISPs connected to the gateway can take payments through the Suntech paybill."
                   : "New platform collections are refused. Payments already made are still recorded and settled."}
               </p>
             </div>
@@ -282,7 +282,7 @@ export default function PlatformGatewayPage() {
         </Panel>
       )}
 
-      <Panel title="ISPs on the gateway" description="Connecting an ISP routes its customers' M-Pesa payments through the MashupHost paybill." padded={false}>
+      <Panel title="ISPs on the gateway" description="Connecting an ISP routes its customers' M-Pesa payments through the Suntech paybill." padded={false}>
         <TableShell minWidth={680}>
           <thead>
             <tr>
@@ -299,7 +299,7 @@ export default function PlatformGatewayPage() {
             {tenants.data?.map((t) => (
               <tr key={t.id}>
                 <td className={`${td} font-medium text-slate-100`}>{t.name}</td>
-                <td className={td}>{t.collectionMode === "PLATFORM" ? <StatusBadge status="SETTLED" label="MashupHost gateway" /> : <StatusBadge status="CANCELLED" label="Own paybill" />}</td>
+                <td className={td}>{t.collectionMode === "PLATFORM" ? <StatusBadge status="SETTLED" label="Suntech gateway" /> : <StatusBadge status="CANCELLED" label="Own paybill" />}</td>
                 <td className={td}>{t.destination?.label ?? <span className="text-slate-500">—</span>}</td>
                 <td className={`${td} text-right`}>
                   <Money minor={t.balance.availableMinor} />
@@ -340,7 +340,7 @@ export default function PlatformGatewayPage() {
         >
           <p>
             {toggle
-              ? "Connected ISPs can take payments through the MashupHost paybill again."
+              ? "Connected ISPs can take payments through the Suntech paybill again."
               : "Customers of connected ISPs will be told online payment is unavailable until you enable it again. Payments already in flight are still recorded."}
           </p>
         </Dialog>
@@ -369,7 +369,7 @@ export default function PlatformGatewayPage() {
           <p>
             {modeChange.collectionMode === "PLATFORM"
               ? "New payments will go to the ISP's own M-Pesa account. Anything the platform already holds for them stays on their balance and is still settled."
-              : "New M-Pesa payments for this ISP will be collected by the MashupHost paybill and credited to their balance, less the platform fee."}
+              : "New M-Pesa payments for this ISP will be collected by the Suntech paybill and credited to their balance, less the platform fee."}
           </p>
           {setMode.error && <Alert>{(setMode.error as ApiRequestError).message}</Alert>}
         </Dialog>

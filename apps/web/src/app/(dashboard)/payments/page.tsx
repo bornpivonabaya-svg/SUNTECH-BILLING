@@ -27,14 +27,14 @@ export default function PaymentsOverviewPage() {
     <PaymentsWorkspace
       tabs={TENANT_TABS}
       title="Payments"
-      description="Money collected for you through the MashupHost payment gateway, and what we've sent on to you."
+      description="Money collected for you through the Suntech payment gateway, and what we've sent on to you."
       actions={<RequestSettlementButton balance={b} destination={data?.destination} minimumMinor={data?.settlement.minimumMinor} />}
     >
       {error && <Alert title="Couldn't load your payments">{(error as Error).message}</Alert>}
 
       {data && !data.gateway.connected && (
-        <Alert tone="blue" title="You're not using the MashupHost gateway yet">
-          Your customers currently pay into your own M-Pesa account. Connect the MashupHost gateway to accept payments without a
+        <Alert tone="blue" title="You're not using the Suntech gateway yet">
+          Your customers currently pay into your own M-Pesa account. Connect the Suntech gateway to accept payments without a
           paybill of your own — we collect, deduct the platform fee, and send the rest to you.{" "}
           <Link href="/payments/settings" className="font-semibold underline">
             Set it up
@@ -56,7 +56,7 @@ export default function PaymentsOverviewPage() {
           value={<Money minor={b?.availableMinor} />}
           loading={isLoading}
           tone={b && b.availableMinor < 0 ? "red" : "green"}
-          hint={b && b.availableMinor < 0 ? "Owed to MashupHost after a refund — recovered from your next collections" : "Ready to be sent to you"}
+          hint={b && b.availableMinor < 0 ? "Owed to Suntech after a refund — recovered from your next collections" : "Ready to be sent to you"}
         />
         <StatCard label="Pending settlement" value={<Money minor={b?.pendingSettlementMinor} />} loading={isLoading} tone="amber" hint="On its way to your destination" />
         <StatCard label="Today's collections" value={<Money minor={data?.todayCollectionsMinor} />} loading={isLoading} />

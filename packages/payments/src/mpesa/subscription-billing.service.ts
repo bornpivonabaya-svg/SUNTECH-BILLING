@@ -42,7 +42,7 @@ export async function initiateSubscriptionChargeStkPush(
     phone: normalizedPhone,
     amountMinor,
     accountReference: "SUBSCRIPTION",
-    transactionDesc: `MASHUPKGRID ISP ${subscription.plan.name} subscription`,
+    transactionDesc: `Suntech Billing ${subscription.plan.name} subscription`,
     callbackUrl,
   });
 

@@ -174,7 +174,7 @@ export async function handleC2BConfirmation(tenantId: string, rawPayload: unknow
 }
 
 /**
- * C2B Confirmation for the PLATFORM paybill (the MashupHost Payment Gateway).
+ * C2B Confirmation for the PLATFORM paybill (the Suntech Payment Gateway).
  *
  * The account number the customer typed must be a payment reference (MH…): that — never the
  * payer's phone number — decides which tenant the money belongs to. A matched payment is recorded
