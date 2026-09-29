@@ -23,6 +23,9 @@ export interface RouterHeartbeatMetrics {
   /** The management VPN as the router reports it; see parseVpnReport. */
   vpnStatus?: "none" | "no-peer" | "waiting" | "connected";
   vpnHandshakeAt?: Date;
+  /** The router's WireGuard public key (mkg-wg), so a lost or changed key is registered again.
+   *  Not stored as a figure: completeRouterProvisioning acts on it. */
+  wgPublicKey?: string;
   /** The router's hotspot self-check; see parseHotspotCheck and hotspotProblems. */
   hotspotCheck?: HotspotCheck;
   hotspotCheckAt?: Date;
@@ -46,6 +49,9 @@ export interface HotspotCheck {
   racc?: number; // … accepted
   rrej?: number; // … rejected
   rto?: number; // … that got no answer
+  /** Set by the platform, not the router: 1 when RADIUS timeouts grew since the last report with
+   *  no answer in between (see withRadiusTrend). */
+  rsilent?: number;
 }
 
 const CHECK_KEYS: (keyof HotspotCheck)[] = ["srv", "hosts", "auth", "leases", "dnsnat", "login", "radios", "garden", "ping", "dns", "lsize", "rreq", "racc", "rrej", "rto"];
@@ -81,7 +87,10 @@ export interface HotspotProblem {
 export function hotspotProblems(check: HotspotCheck | null | undefined): HotspotProblem[] {
   if (!check) return [];
   const out: HotspotProblem[] = [];
-  if (check.ping === 0) out.push({ code: "no-internet", message: "The router itself has no internet: its WAN (ether1) link or the upstream modem is down." });
+  // This report reached the platform over the internet, so a ping alone that went unanswered is
+  // an ISP or modem blocking ping. Only both failing (no ping, no DNS) means no internet.
+  if (check.ping === 0 && check.dns === 0)
+    out.push({ code: "no-internet", message: "The router itself has no internet: its WAN (ether1) link or the upstream modem is down." });
   if (check.dns === 0) out.push({ code: "no-dns", message: "The router can't look up names (DNS), so the sign-in page and every website fail." });
   if (check.srv === 0) out.push({ code: "no-hotspot", message: "No hotspot server is running on the router, so phones never get the sign-in page." });
   if (check.login === 0) out.push({ code: "no-login-page", message: "The sign-in page file (hotspot/login.html) is missing on the router." });
@@ -89,12 +98,29 @@ export function hotspotProblems(check: HotspotCheck | null | undefined): Hotspot
   if (check.garden === 0) out.push({ code: "no-walled-garden", message: "The payment portal isn't in the walled garden, so the sign-in page can't open." });
   if (check.lsize !== undefined && check.lsize < 200)
     out.push({ code: "login-page-broken", message: `The sign-in page file in ${check.dir ?? "hotspot"} is empty or broken (${check.lsize} bytes), so phones get no sign-in page.` });
-  if ((check.rto ?? 0) > 0 && (check.racc ?? 0) === 0 && (check.rrej ?? 0) === 0)
+  const radiusSilent = check.rsilent !== undefined ? check.rsilent === 1 : (check.rto ?? 0) > 0 && (check.racc ?? 0) === 0 && (check.rrej ?? 0) === 0;
+  if (radiusSilent)
     out.push({ code: "radius-silent", message: `RADIUS never answered the router (${check.rto} timeouts): logins can't be checked. The server must allow UDP 1812-1813 and list this router's public IP.` });
   if (check.dnsnat !== undefined && check.dnsnat > 2) out.push({ code: "dns-rules-piled", message: `${check.dnsnat} copies of the DNS redirect rule (should be 2) are slowing the router.` });
   if (check.leases !== undefined && check.leases > 0 && check.hosts === 0 && check.srv !== 0)
     out.push({ code: "hosts-bypass", message: "Phones get an address but never reach the hotspot: it runs on a different port than the Wi-Fi." });
   return out;
+}
+
+/**
+ * The router's RADIUS counters run from its last reboot, so "timeouts, no answers" stayed true long
+ * after a problem was fixed (typically: phones tried to log in while the router was still being
+ * set up). Compared with the previous report, it becomes "timing out right now": new timeouts in
+ * the last minute and no new answer. With no previous report of this boot, the counters are all
+ * there is.
+ */
+export function withRadiusTrend(next: HotspotCheck, previous?: HotspotCheck | null): HotspotCheck {
+  const n = (v?: number) => v ?? 0;
+  const sameBoot = previous && n(next.rreq) >= n(previous.rreq) && n(next.rto) >= n(previous.rto);
+  const silent = sameBoot
+    ? n(next.rto) > n(previous!.rto) && n(next.racc) === n(previous!.racc) && n(next.rrej) === n(previous!.rrej)
+    : n(next.rto) > 0 && n(next.racc) === 0 && n(next.rrej) === 0;
+  return { ...next, rsilent: silent ? 1 : 0 };
 }
 
 /**
@@ -112,6 +138,9 @@ export function parseVpnReport(value: string | null, now = Date.now()): Pick<Rou
   if (ago === undefined) return { vpnStatus: "waiting" };
   return { vpnStatus: ago <= 180 ? "connected" : "waiting", vpnHandshakeAt: new Date(now - ago * 1000) };
 }
+
+/** A WireGuard public key: 32 bytes of standard base64 (the last character carries 4 bits). */
+const WIREGUARD_KEY = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/;
 
 /** True when a callback body is this report rather than a WireGuard public key. */
 export function isHeartbeatReport(body: string): boolean {
@@ -207,6 +236,9 @@ export function parseHeartbeatReport(body: string, query: Record<string, unknown
   }
 
   Object.assign(metrics, parseVpnReport(get("wg")));
+  // Sent raw in the form body, so base64's "+" arrives as a space.
+  const wgKey = get("wgkey")?.trim().replace(/ /g, "+");
+  if (wgKey && WIREGUARD_KEY.test(wgKey)) metrics.wgPublicKey = wgKey;
   const hotspotCheck = parseHotspotCheck(get("hs"));
   if (hotspotCheck) {
     metrics.hotspotCheck = hotspotCheck;

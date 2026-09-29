@@ -18,7 +18,8 @@ import { ensureWinboxRelayPort } from "./winbox-relay.service.js";
 import { APP_FILTER_RULE_COUNT, APP_FILTER_TAG } from "./app-filter.js";
 import { rememberActiveDevices } from "./hotspot-device.service.js";
 import { listWalledGardenHostsFor } from "./walled-garden.js";
-import type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
+import { withRadiusTrend, type HotspotCheck, type RouterHeartbeatMetrics } from "./heartbeat-report.js";
+import { heartbeatOnlineWindowMs } from "./heartbeat-interval.js";
 
 export type { RouterHeartbeatMetrics } from "./heartbeat-report.js";
 
@@ -246,9 +247,60 @@ async function syncRadiusNasRegistration(router: Router, sourceAddress: string):
  *  still runs with until a freshly issued setup command has been run (see issueSetupCommand). */
 export async function findRouterByProvisionToken(provisionToken: string): Promise<Router | null> {
   const hash = hashToken(provisionToken);
-  return prisma.router.findFirst({
+  const router = await prisma.router.findFirst({
     where: { deletedAt: null, OR: [{ provisionTokenHash: hash }, { previousProvisionTokenHash: hash }] },
   });
+  return router ?? adoptReaddedRouter(hash);
+}
+
+/**
+ * A router removed from the dashboard and added again is still the same box: it keeps checking in
+ * with the token of the removed record, and its RADIUS secret and management account are that
+ * record's credentials. Without this, removing and re-adding left it refused as an unknown router —
+ * Offline, never repaired, and every customer login failing on a secret the new record didn't have.
+ *
+ * So a token of a removed router is handed to the one live router of the same ISP added after the
+ * removal under the same name or address that has not checked in yet: it takes over the token and
+ * the credentials the box really has, and the WireGuard peer. Anything less certain (none, or two
+ * candidates) adopts nothing, and the ISP runs the new setup command as before.
+ */
+async function adoptReaddedRouter(hash: string): Promise<Router | null> {
+  const removed = await prisma.router.findFirst({
+    where: { deletedAt: { not: null }, OR: [{ provisionTokenHash: hash }, { previousProvisionTokenHash: hash }] },
+    orderBy: { deletedAt: "desc" },
+  });
+  if (!removed?.deletedAt) return null;
+  const sameBox = [{ name: removed.name }, ...(removed.host ? [{ host: removed.host }] : [])];
+  const candidates = await prisma.router.findMany({
+    where: { tenantId: removed.tenantId, deletedAt: null, provisionedAt: null, createdAt: { gt: removed.deletedAt }, OR: sameBox },
+  });
+  if (candidates.length !== 1) return null;
+  const target = candidates[0]!;
+
+  const [, adopted] = await prisma.$transaction([
+    // The hashes are unique: the removed record gives them up first.
+    prisma.router.update({ where: { id: removed.id }, data: { provisionTokenHash: null, previousProvisionTokenHash: null } }),
+    prisma.router.update({
+      where: { id: target.id },
+      data: {
+        ...(target.provisionTokenHash ? { previousProvisionTokenHash: hash } : { provisionTokenHash: hash }),
+        usernameEncrypted: removed.usernameEncrypted,
+        passwordEncrypted: removed.passwordEncrypted,
+        ...(removed.vpnPublicKey && !target.vpnPublicKey
+          ? { vpnPublicKey: removed.vpnPublicKey, vpnIp: removed.vpnIp, vpnConfiguredAt: removed.vpnConfiguredAt }
+          : {}),
+      },
+    }),
+  ]);
+  if (adopted.vpnPublicKey && adopted.vpnIp && adopted.vpnPublicKey === removed.vpnPublicKey) {
+    try {
+      await registerWireguardPeer(env.WIREGUARD_INTERFACE, adopted.vpnPublicKey, adopted.vpnIp);
+    } catch (err) {
+      console.warn("WireGuard peer registration warning on re-added router:", err);
+    }
+  }
+  console.log(`[routers] "${adopted.name}" was removed and added again: the router's check-in now reaches the new record`);
+  return adopted;
 }
 
 /**
@@ -280,7 +332,14 @@ export async function completeRouterProvisioning(
   const router = await findRouterByProvisionToken(provisionToken);
   if (!router) throw new NotFoundError("Provisioning token");
 
-  const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : "";
+  // The key the setup script sends once, or the one the router's report carries when it differs
+  // from what is registered (sending it once failed, or the router's key changed).
+  const reportedKey = metrics?.wgPublicKey && metrics.wgPublicKey !== router.vpnPublicKey ? metrics.wgPublicKey : "";
+  const cleanWgKey = wgPublicKey ? wgPublicKey.replace(/["'\r\n]/g, "").trim().replace(/ /g, "+") : reportedKey;
+  if (metrics?.wgPublicKey) {
+    const { wgPublicKey: _key, ...figures } = metrics;
+    metrics = figures;
+  }
 
   const updateData: Record<string, unknown> = {
     // The router checked in with its new token: the old one has done its job.
@@ -293,6 +352,10 @@ export async function completeRouterProvisioning(
     provisionedAt: router.provisionedAt ?? new Date(),
   };
 
+  // RADIUS "timing out right now" needs the previous minute's counters (see withRadiusTrend).
+  if (metrics?.hotspotCheck) {
+    metrics = { ...metrics, hotspotCheck: withRadiusTrend(metrics.hotspotCheck, router.hotspotCheck as HotspotCheck | null) };
+  }
   // Everything the router reported about itself; a field it didn't send keeps its last value.
   for (const [key, value] of Object.entries(metrics ?? {})) {
     if (value !== undefined) updateData[key] = value;
@@ -533,11 +596,13 @@ export async function deleteRouter(tenantId: string, routerId: string): Promise<
   ]);
 }
 
-/** How long after its last heartbeat a router is still considered alive when the platform
- *  cannot open a management connection to it. buildMikrotikProvisioningScript schedules that
- *  heartbeat every 60s (1m), so 2.5 minutes represents 2 missed heartbeats: responsive enough
- *  that staff immediately see when a router is powered off, yet tolerant of a momentary dropped packet. */
-const HEARTBEAT_LIVENESS_WINDOW_MS = 2.5 * 60 * 1000;
+/** Whether a router's last heartbeat is recent enough to count it alive when the platform cannot
+ *  open a management connection to it: 2.5 check-in intervals, i.e. 2 missed heartbeats (every
+ *  minute, or every 5 on a small router — see heartbeat-interval.ts). Responsive enough that staff
+ *  see a powered-off router quickly, tolerant of a momentary dropped packet. */
+function heardFromRecently(router: Router): boolean {
+  return Boolean(router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < heartbeatOnlineWindowMs(router));
+}
 
 /** Opens a real connection to the router, runs a health check, and persists the result onto
  *  the Router row (status/lastSeenAt/lastError/resource usage) so the routers list reflects
@@ -704,7 +769,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
           health = vpnHealth;
           await prisma.router.update({ where: { id: router.id }, data: { host: router.vpnIp } });
           router.host = router.vpnIp;
-        } else if (router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < HEARTBEAT_LIVENESS_WINDOW_MS) {
+        } else if (heardFromRecently(router)) {
           inferredFromHeartbeat = true;
           health = {
             reachable: true,
@@ -718,7 +783,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
           health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
         }
       } catch {
-        if (router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < HEARTBEAT_LIVENESS_WINDOW_MS) {
+        if (heardFromRecently(router)) {
           inferredFromHeartbeat = true;
           health = {
             reachable: true,
@@ -732,7 +797,7 @@ export async function testRouterConnection(tenantId: string, routerId: string): 
           health = { reachable: false, error: err instanceof Error ? err.message : String(err) };
         }
       }
-    } else if (router.lastSeenAt && Date.now() - router.lastSeenAt.getTime() < HEARTBEAT_LIVENESS_WINDOW_MS) {
+    } else if (heardFromRecently(router)) {
       inferredFromHeartbeat = true;
       health = {
         reachable: true,

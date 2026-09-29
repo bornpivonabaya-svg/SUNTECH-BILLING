@@ -23,5 +23,4 @@ export const PUBLIC_ROUTES = [
   { path: "/terms", priority: 0.3, changeFrequency: "yearly" as const },
   { path: "/refund-policy", priority: 0.3, changeFrequency: "yearly" as const },
   { path: "/age-policy", priority: 0.3, changeFrequency: "yearly" as const },
-  { path: "/referral-policy", priority: 0.3, changeFrequency: "yearly" as const },
 ];

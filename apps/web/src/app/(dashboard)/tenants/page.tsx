@@ -7,14 +7,10 @@ import { formatMoney } from "@/lib/money";
 import { Button, Card, ErrorText, HintText, Input, Label, Badge, StatusDot } from "@/components/ui";
 import { IconTenants, IconCopy, IconCheck } from "@/components/icons";
 import { UpgradeTenantModal } from "@/components/tenants/upgrade-tenant-modal";
+import { TENANT_FEATURES as SHARED_TENANT_FEATURES, TENANT_FEATURE_LABELS } from "@mashupkgrid/shared/src/features";
 
-const TENANT_FEATURES = [
-  { key: "AI_ASSISTANT", label: "AI Assistant (hotspot package management)" },
-  { key: "LIVE_CHAT", label: "Live Chat (Tawk.to widget)" },
-  { key: "WIREGUARD_REMOTE_ACCESS", label: "WireGuard Remote Router Access" },
-  { key: "HOTSPOT_VOUCHERS", label: "Hotspot Vouchers & Captive Portal" },
-  { key: "SUPPORT_TICKETS", label: "Support Tickets" },
-] as const;
+// One list for the whole platform (packages/shared features.ts), so a new feature shows up here.
+const TENANT_FEATURES = SHARED_TENANT_FEATURES.map((key) => ({ key, label: TENANT_FEATURE_LABELS[key] }));
 
 interface TenantPlanSummary {
   id: string;
@@ -46,6 +42,7 @@ interface Tenant {
     id: string;
     status: "TRIALING" | "ACTIVE" | "PAST_DUE" | "EXPIRED" | "CANCELLED";
     billingCycle: "MONTHLY" | "ANNUAL";
+    currentPeriodEnd?: string;
     plan: TenantPlanSummary;
   } | null;
 }
@@ -148,6 +145,102 @@ function OwnerLine({ owner }: { owner: NonNullable<Tenant["owner"]> }) {
 
 /** Extend, set or end the free trial. Uses the trial endpoint, which also keeps the ISP's trial
  *  plan in step and shows them a banner with the new date. */
+/** "Activate (paid)": unlocks an ISP that paid outside M-Pesa — cash, bank, a deal. The
+ *  subscription becomes active for the chosen months (added after any paid time left) and the
+ *  payment is recorded in the ISP's billing history with the reference given. */
+function ActivateSubscription({ tenant, plans, onError }: { tenant: Tenant; plans: TenantPlanSummary[]; onError: (message: string) => void }) {
+  const queryClient = useQueryClient();
+  const [months, setMonths] = useState(1);
+  const [planId, setPlanId] = useState(tenant.subscription?.plan.id ?? "");
+  const [amountKes, setAmountKes] = useState("");
+  const [reference, setReference] = useState("");
+  const [done, setDone] = useState<string | null>(null);
+  const activate = useMutation({
+    mutationFn: () =>
+      apiFetch<{ planName: string; activeUntil: string }>(`/api/v1/platform/tenants/${tenant.id}/subscription/activate`, {
+        method: "POST",
+        body: JSON.stringify({
+          months,
+          ...(planId ? { planId } : {}),
+          ...(amountKes.trim() ? { amountKes: Number(amountKes) } : {}),
+          ...(reference.trim() ? { reference: reference.trim() } : {}),
+        }),
+      }),
+    onSuccess: (r) => {
+      setDone(`${r.planName} is active until ${new Date(r.activeUntil).toLocaleDateString()}.`);
+      setAmountKes("");
+      setReference("");
+      queryClient.invalidateQueries({ queryKey: ["tenants"] });
+    },
+    onError: (err) => onError(err instanceof ApiRequestError ? err.message : "Could not activate the subscription"),
+  });
+  const paidUntil = tenant.subscription?.status === "ACTIVE" && tenant.subscription.currentPeriodEnd ? new Date(tenant.subscription.currentPeriodEnd) : null;
+
+  return (
+    <div className="mt-2 rounded-xl border border-slate-200 p-3 dark:border-obsidian-800">
+      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Activate (paid outside M-Pesa)</p>
+      <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+        {paidUntil
+          ? `Paid until ${paidUntil.toLocaleDateString()}. New months are added after that.`
+          : "Unlocks the ISP now and records the payment in their billing history."}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Plan"
+          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-obsidian-700 dark:bg-obsidian-950 dark:text-slate-100"
+          value={planId}
+          onChange={(e) => setPlanId(e.target.value)}
+        >
+          <option value="">{tenant.subscription ? "Current plan" : "Choose plan…"}</option>
+          {plans.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Months"
+          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-obsidian-700 dark:bg-obsidian-950 dark:text-slate-100"
+          value={months}
+          onChange={(e) => setMonths(Number(e.target.value))}
+        >
+          {[1, 2, 3, 6, 12].map((m) => (
+            <option key={m} value={m}>
+              {m} month{m > 1 ? "s" : ""}
+            </option>
+          ))}
+        </select>
+        <Input
+          aria-label="Amount paid (KES)"
+          inputMode="decimal"
+          placeholder="Amount KES (plan price)"
+          value={amountKes}
+          onChange={(e) => setAmountKes(e.target.value.replace(/[^\d.]/g, ""))}
+          className="!w-40 !py-1 text-xs"
+        />
+        <Input
+          aria-label="Reference"
+          placeholder="Reference (receipt, bank ref…)"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+          className="!w-52 !py-1 text-xs"
+        />
+        <Button
+          className="px-2.5 py-1 text-xs"
+          disabled={activate.isPending || (!tenant.subscription && !planId)}
+          onClick={() => {
+            setDone(null);
+            activate.mutate();
+          }}
+        >
+          {activate.isPending ? "Activating…" : `Activate ${months} month${months > 1 ? "s" : ""}`}
+        </Button>
+      </div>
+      {done && <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400" role="status">✓ {done}</p>}
+    </div>
+  );
+}
+
 function TrialControls({ tenant, onError }: { tenant: Tenant; onError: (message: string) => void }) {
   const queryClient = useQueryClient();
   const [until, setUntil] = useState("");
@@ -346,6 +439,7 @@ function TenantManagePanel({ tenant, onOpenUpgrade }: { tenant: Tenant; onOpenUp
             ))}
           </select>
         </div>
+        <ActivateSubscription tenant={tenant} plans={plans ?? []} onError={setError} />
       </div>
       {/* Settlement — who collects this tenant's customer payments, and where their money is
           sent when this platform collects on their behalf. */}

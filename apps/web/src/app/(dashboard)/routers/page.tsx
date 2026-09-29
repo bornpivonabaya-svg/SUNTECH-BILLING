@@ -822,6 +822,15 @@ export default function RoutersPage() {
               ) : (
                 <p className="mt-1 text-sm text-amber-300">{remoteWinboxProblem}</p>
               )}
+              {/* The address alone isn't enough: the relay reaches the router over its VPN, and
+                  WinBox shows only "The remote host closed the connection" when that tunnel is down. */}
+              {remoteWinbox && winboxModalFor.vpnStatus && winboxModalFor.vpnStatus !== "connected" && (
+                <p className="mt-2 text-sm text-amber-300">
+                  {tr(
+                    "This router's VPN is not connected right now, so WinBox will say \"The remote host closed the connection\". The router repairs its VPN on each check-in; if it stays like this, check the router has internet and run its setup command again."
+                  )}
+                </p>
+              )}
               <p className="mt-3 text-xs leading-relaxed text-slate-500">
                 {t.relayExplain}
               </p>

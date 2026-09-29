@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma, type Tenant } from "@mashupkgrid/database";
 import { initiateOnboardingFeeStkPush, getOnboardingFeeStatus } from "@mashupkgrid/payments";
 import { env } from "@mashupkgrid/config";
+import { heartbeatOnlineWindowMs } from "@mashupkgrid/network";
 import {
   successResponse,
   NotFoundError,
@@ -165,7 +166,7 @@ async function loadTenantUsage(tenantIds: string[]): Promise<Map<string, TenantU
   const [routers, customers, revenue] = await Promise.all([
     prisma.router.findMany({
       where: { tenantId: { in: tenantIds }, deletedAt: null },
-      select: { tenantId: true, status: true, lastSeenAt: true },
+      select: { tenantId: true, status: true, lastSeenAt: true, memoryTotalBytes: true, boardName: true },
     }),
     prisma.customer.groupBy({
       by: ["tenantId"],
@@ -195,7 +196,8 @@ async function loadTenantUsage(tenantIds: string[]): Promise<Map<string, TenantU
     const isReallyOnline =
       row.status === "ONLINE" &&
       row.lastSeenAt !== null &&
-      nowMs - new Date(row.lastSeenAt).getTime() <= 150_000;
+      // Every minute, or every 5 on a small router: 2.5 check-ins (heartbeat-interval.ts).
+      nowMs - new Date(row.lastSeenAt).getTime() <= heartbeatOnlineWindowMs(row);
     if (isReallyOnline) entry.routersOnline += 1;
   }
   for (const row of customers) usage.get(row.tenantId)!.customerCount = row._count._all;
@@ -592,6 +594,92 @@ interface TenantUsage {
    * now work. Idempotent on an already-active tenant so a double click sends one welcome.
    */
   /**
+   * Unlocks an ISP that paid outside M-Pesa (cash, bank, a deal): its subscription becomes ACTIVE
+   * for the chosen number of months — exactly what a completed M-Pesa renewal does (status, period,
+   * grace cleared, trial lock lifted) — and a COMPLETED payment is recorded with the super admin's
+   * reference, so it shows in the ISP's billing history. The months start after any paid time the
+   * ISP still has, so an early payment loses nothing. An ISP with no plan gets the one chosen here.
+   */
+  app.post(
+    "/:tenantId/subscription/activate",
+    { config: { audience: "platform" }, preHandler: [...preHandler, requirePermission("tenants.update")] },
+    async (request, reply) => {
+      const { tenantId } = idParamsSchema.parse(request.params);
+      const body = z
+        .object({
+          months: z.number().int().min(1).max(24),
+          planId: z.string().uuid().optional(),
+          amountKes: z.number().min(0).max(10_000_000).optional(),
+          reference: z.string().trim().max(64).optional(),
+        })
+        .parse(request.body);
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, include: { subscription: true } });
+      if (!tenant || tenant.deletedAt) throw new NotFoundError("Tenant");
+      const planId = body.planId ?? tenant.subscription?.planId;
+      if (!planId) throw new ConflictError("This ISP has no plan yet: choose one to activate.");
+      const plan = await prisma.tenantPlan.findUnique({ where: { id: planId } });
+      if (!plan) throw new NotFoundError("Plan");
+
+      const now = new Date();
+      const sub = tenant.subscription;
+      const paidUntil = sub && sub.status === "ACTIVE" && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now;
+      const periodEnd = new Date(paidUntil);
+      periodEnd.setMonth(periodEnd.getMonth() + body.months);
+      const amountMinor = Math.round((body.amountKes ?? (plan.monthlyPriceMinor * body.months) / 100) * 100);
+      const period = { status: "ACTIVE" as const, currentPeriodStart: paidUntil, currentPeriodEnd: periodEnd, gracePeriodEndsAt: null };
+
+      const subscription = sub
+        ? await prisma.tenantSubscription.update({ where: { id: sub.id }, data: { planId, billingCycle: "MONTHLY", ...period } })
+        : await prisma.tenantSubscription.create({ data: { tenantId, planId, billingCycle: "MONTHLY", ...period } });
+      const until = periodEnd.toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric", timeZone: tenant.timezone || "Africa/Nairobi" });
+      await prisma.$transaction([
+        prisma.tenantSubscriptionPayment.create({
+          data: {
+            tenantId,
+            subscriptionId: subscription.id,
+            amountMinor,
+            billingCycle: "MONTHLY",
+            periodStart: paidUntil,
+            periodEnd,
+            status: "COMPLETED",
+            paidAt: now,
+            mpesaReceiptNumber: body.reference || null,
+            resultDesc: `Recorded by the platform${body.reference ? ` (${body.reference})` : ""}`,
+          },
+        }),
+        prisma.tenant.update({ where: { id: tenantId }, data: { trialEndsAt: null } }),
+        prisma.platformAnnouncement.deleteMany({
+          where: { tenantId, title: { in: ["Your free trial has ended", "Your free trial has been extended", "Subscription expired", "Your subscription payment is due"] } },
+        }),
+        prisma.platformAnnouncement.create({
+          data: {
+            tenantId,
+            title: "Your subscription is active",
+            body: `Thank you for your payment. Your ${plan.name} plan is active until ${until}.`,
+            severity: "INFO",
+            createdByUserId: request.user!.id,
+            expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+          },
+        }),
+      ]);
+
+      await writeAuditLog({
+        tenantId,
+        actorUserId: request.user!.id,
+        action: "tenant.subscription_activated",
+        resourceType: "TenantSubscription",
+        resourceId: subscription.id,
+        before: sub ? { status: sub.status, planId: sub.planId, currentPeriodEnd: sub.currentPeriodEnd } : null,
+        after: { status: "ACTIVE", planId, currentPeriodEnd: periodEnd, months: body.months, amountMinor, reference: body.reference ?? null },
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+
+      reply.send(successResponse({ status: "ACTIVE", planName: plan.name, activeUntil: periodEnd.toISOString(), amountMinor }, request.id));
+    }
+  );
+
+  /**
    * The tenant's free trial: extend it by some days, set its end date, or end it now. Keeps the
    * trial subscription in step (the hourly expire-trials job reads its currentPeriodEnd, and would
    * otherwise mark an extended trial expired), clears the "trial ended" banners a new date makes
@@ -815,13 +903,18 @@ interface TenantUsage {
             data: { planId, ...(billingCycle ? { billingCycle } : {}) },
           })
         : await prisma.tenantSubscription.create({
-            data: {
-              tenantId,
-              planId,
-              billingCycle: billingCycle ?? "MONTHLY",
-              status: "ACTIVE",
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            },
+            // An ISP still on its free trial stays on it: choosing a plan sets its limits, it
+            // doesn't mark it paid. Otherwise, as before, 30 days active.
+            data:
+              tenant.trialEndsAt && tenant.trialEndsAt > new Date()
+                ? { tenantId, planId, billingCycle: billingCycle ?? "MONTHLY", status: "TRIALING", currentPeriodEnd: tenant.trialEndsAt }
+                : {
+                    tenantId,
+                    planId,
+                    billingCycle: billingCycle ?? "MONTHLY",
+                    status: "ACTIVE",
+                    currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                  },
           });
 
       await writeAuditLog({

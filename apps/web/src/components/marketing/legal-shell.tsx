@@ -6,7 +6,6 @@ import { SiteFooter } from "./site-footer";
 const POLICIES = [
   { href: "/terms", label: "Terms of Service" },
   { href: "/refund-policy", label: "Refund & Billing Policy" },
-  { href: "/referral-policy", label: "Referral & Affiliate Policy" },
   { href: "/age-policy", label: "Age & Protection Policy" },
 ] as const;
 

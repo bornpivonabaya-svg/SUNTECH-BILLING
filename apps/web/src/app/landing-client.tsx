@@ -7,7 +7,6 @@ import { DEFAULT_LANDING_SECTIONS, type LandingIcon, type LandingSections } from
 import { SiteHeader } from "@/components/marketing/site-header";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SUPPORT_PHONE_DISPLAY, whatsappLink } from "@/components/marketing/brand";
-import { DashboardCustomersPreview, DashboardOverviewPreview } from "@/components/marketing/dashboard-preview";
 import {
   IconArrowRight,
   IconCheck,
@@ -61,7 +60,6 @@ const MORE_INTEGRATIONS = ["Paystack", "Pesapal", "Africa's Talking SMS", "WireG
 /** Set to a plan name to give it the highlighted treatment. Left unset on purpose: there is no
  *  sales data in the project saying which plan most customers choose, and a "Most popular" badge
  *  is a factual claim. */
-const FEATURED_PLAN: string | null = null;
 
 // ---------------------------------------------------------------------------------------------
 
@@ -194,24 +192,52 @@ function formatKes(amount: number): string {
   return new Intl.NumberFormat("en-KE").format(amount);
 }
 
-export function LandingClient({ initialContent, sections: givenSections }: { initialContent?: LandingContent; sections?: LandingSections }) {
+/** A plan as /api/v1/public/plans returns it; prices in minor units (cents). */
+export interface PublicPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  monthlyPriceMinor: number;
+  /** The whole year's price, or null when the plan has no yearly price. */
+  annualPriceMinor: number | null;
+  trialDays: number;
+  maxCustomers: number | null;
+  maxRouters: number | null;
+  isDefault: boolean;
+}
+
+const limitText = (n: number | null, what: string) => (n === null ? `Unlimited ${what}` : `Up to ${n.toLocaleString("en-KE")} ${what}`);
+
+export function LandingClient({
+  initialContent,
+  sections: givenSections,
+  plans: realPlans = [],
+}: {
+  initialContent?: LandingContent;
+  sections?: LandingSections;
+  plans?: PublicPlan[];
+}) {
   const content = initialContent ?? DEFAULT_LANDING_CONTENT;
   const sections = givenSections ?? DEFAULT_LANDING_SECTIONS;
-  const { hero, pricing, faqs, footer } = content;
+  const { hero, faqs, footer } = content;
   const [annual, setAnnual] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
-  const plans = [
-    { name: "Starter", audience: "For small ISPs", monthly: pricing.starterMonthly, yearly: pricing.starterAnnual },
-    { name: "Growth", audience: "For growing ISPs", monthly: pricing.growthMonthly, yearly: pricing.growthAnnual },
-    { name: "Enterprise", audience: "For larger ISPs", monthly: pricing.carrierMonthly, yearly: pricing.carrierAnnual },
-  ];
+  // The platform's real plans: the website never shows a price the platform doesn't charge.
+  const plans = realPlans.map((p) => ({
+    name: p.name,
+    audience: `${limitText(p.maxRouters, "routers")} · ${limitText(p.maxCustomers, "customers")}`,
+    trialDays: p.trialDays,
+    monthly: Math.round(p.monthlyPriceMinor / 100),
+    // Shown per month when billed yearly.
+    yearly: Math.round((p.annualPriceMinor ?? p.monthlyPriceMinor * 12) / 1200),
+  }));
 
-  // Derived from the configured prices rather than written as copy, so the toggle label can never
-  // promise a discount the numbers don't deliver (and disappears if annual isn't cheaper).
-  const annualSaving = Math.round(
-    Math.min(...plans.map((p) => (p.monthly > 0 ? (1 - p.yearly / p.monthly) * 100 : 0)))
-  );
+  // Derived from the real prices, so the toggle label can never promise a discount the numbers
+  // don't deliver (and disappears if annual isn't cheaper).
+  const annualSaving = plans.length
+    ? Math.round(Math.min(...plans.map((p) => (p.monthly > 0 ? (1 - p.yearly / p.monthly) * 100 : 0))))
+    : 0;
 
   const salesLink = whatsappLink("Hello Suntech Billing, I'd like to talk to sales about the ISP platform.");
 
@@ -232,7 +258,7 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:linear-gradient(to_bottom,black,transparent_75%)]"
           />
-          <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-4 pt-14 pb-16 sm:px-6 sm:pt-20 sm:pb-24 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-14 lg:px-8">
+          <div className="relative mx-auto max-w-4xl px-4 pt-14 pb-16 sm:px-6 sm:pt-20 sm:pb-24 lg:px-8">
             <div className="max-w-xl">
               {/* The hero is the copy the landing editor (Website › Landing page) edits; it used
                   to be hardcoded here, so edits saved but never showed. */}
@@ -262,9 +288,6 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
               </ul>
             </div>
 
-            <div className="min-w-0 lg:-mr-8 xl:-mr-16">
-              <DashboardOverviewPreview />
-            </div>
           </div>
         </section>
 
@@ -331,7 +354,7 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
 
         {/* -------------------------------------------------------------- SHOWCASE */}
         <section id="product" aria-labelledby="product-title" className="scroll-mt-20 border-y border-slate-200 bg-slate-50">
-          <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 sm:py-28 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16 lg:px-8">
+          <div className="mx-auto max-w-4xl px-4 py-14 sm:px-6 sm:py-28 lg:px-8">
             <div>
               <SectionHeading
                 id="product-title"
@@ -352,9 +375,6 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
                   Create your workspace <IconArrowRight size={16} />
                 </Link>
               </div>
-            </div>
-            <div className="hidden min-w-0 sm:block">
-              <DashboardCustomersPreview />
             </div>
           </div>
         </section>
@@ -450,16 +470,21 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
               </div>
             </div>
 
-            <ul className="mt-12 grid gap-4 lg:grid-cols-3">
+            {plans.length === 0 && (
+              <p className="mt-12 rounded-lg border border-slate-200 bg-white p-7 text-sm text-slate-600">
+                Plans and prices are shown when you{" "}
+                <Link href="/register" className="font-semibold text-blue-700 hover:text-blue-800">
+                  create your workspace
+                </Link>
+                .
+              </p>
+            )}
+            <ul className={`mt-12 grid gap-4 lg:grid-cols-3 ${plans.length === 0 ? "hidden" : ""}`}>
               {plans.map((plan) => {
-                const featured = plan.name === FEATURED_PLAN;
-                const isEnterprise = plan.name === "Enterprise";
                 return (
                   <li
                     key={plan.name}
-                    className={`flex flex-col rounded-lg border bg-white p-7 ${
-                      featured ? "border-blue-700 shadow-[0_0_0_1px_rgb(29,78,216)]" : "border-slate-200"
-                    }`}
+                    className="flex flex-col rounded-lg border border-slate-200 bg-white p-7"
                   >
                     <h3 className="text-lg font-semibold text-slate-950">{plan.name}</h3>
                     <p className="mt-1 text-sm text-slate-500">{plan.audience}</p>
@@ -474,27 +499,12 @@ export function LandingClient({ initialContent, sections: givenSections }: { ini
                       {annual ? `Billed annually · KES ${formatKes(plan.yearly * 12)} per year` : "Billed monthly"}
                     </p>
                     <div className="mt-7">
-                      {isEnterprise ? (
-                        <a
-                          href={salesLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block rounded-md border border-slate-300 px-4 py-2.5 text-center text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50"
-                        >
-                          Contact Sales
-                        </a>
-                      ) : (
-                        <Link
-                          href="/register"
-                          className={`block rounded-md px-4 py-2.5 text-center text-sm font-semibold transition-colors ${
-                            featured
-                              ? "bg-blue-700 text-white hover:bg-blue-800"
-                              : "border border-slate-300 text-slate-800 hover:border-slate-400 hover:bg-slate-50"
-                          }`}
-                        >
-                          Get Started
-                        </Link>
-                      )}
+                      <Link
+                        href="/register"
+                        className="block rounded-md border border-slate-300 px-4 py-2.5 text-center text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50"
+                      >
+                        {plan.trialDays > 0 ? `Start ${plan.trialDays}-day free trial` : "Get Started"}
+                      </Link>
                     </div>
                   </li>
                 );

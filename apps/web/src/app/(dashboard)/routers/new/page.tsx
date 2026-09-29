@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, ApiRequestError } from "@/lib/api-client";
-import { tr } from "@/lib/tr";
 import { Button, Card, ErrorText, HintText, Input, Label } from "@/components/ui";
 import { CodeBlock, Notice, PageHeader, Pill } from "@/components/dashboard/surface";
-import { IconCheck, IconChevronRight, IconRouter } from "@/components/icons";
+import { IconCheck, IconChevronRight } from "@/components/icons";
 
 type Step = 1 | 2 | 3;
+/** What the router is for, in the words an ISP uses. */
+type Use = "hotspot" | "pppoe" | "both";
 
 interface RouterRecord {
   id: string;
@@ -20,16 +21,38 @@ interface RouterRecord {
   lastError: string | null;
 }
 
-// One script does the whole job -- API user, RADIUS, hotspot server, walled garden and portal
-// page all come from the single provisioning script in step 2 (buildMikrotikProvisioningScript).
-// There is deliberately no separate "RADIUS" step: it used to ask for a FreeRADIUS host and hand
-// out a clients.conf snippet, neither of which this platform uses -- RADIUS is the worker's own
-// embedded server and the NAS row registers itself from the router's heartbeat.
+// Linking a router is three plain steps: name it and say what it's for, paste one command, and
+// it links itself. The one setup script (buildMikrotikProvisioningScript) does everything else —
+// API user, RADIUS, hotspot and its sign-in page, DNS, NAT, walled garden, PPPoE server — so
+// nothing here asks for an IP, port or password. Port roles, RouterOS version and the rest have
+// safe defaults under "Advanced": the defaults are right for a normal hAP / RB setup.
 const STEPS: { n: Step; label: string }[] = [
-  { n: 1, label: "Identity" },
-  { n: 2, label: "Provision" },
+  { n: 1, label: "Name it" },
+  { n: 2, label: "Paste the command" },
   { n: 3, label: "Done" },
 ];
+
+/** What one port on the router is for. */
+type PortRole = "hotspot" | "pppoe" | "office";
+const ROLE_LABEL: Record<PortRole, string> = { hotspot: "Hotspot", pppoe: "PPPoE customers", office: "Office (no sign-in)" };
+const ROLE_TONE: Record<PortRole, string> = {
+  hotspot: "border-blue-600 bg-blue-600 text-white",
+  pppoe: "border-purple-600 bg-purple-600 text-white",
+  office: "border-emerald-600 bg-emerald-600 text-white",
+};
+/** Common MikroTik sizes: hAP lite (4), hAP ac² / RB750 (5), RB2011 / hEX S (8 or so), RB4011 (10), CCR (13). */
+const PORT_COUNTS = [4, 5, 8, 10, 13] as const;
+
+/** ether2…etherN: ether1 is always the internet. */
+const lanPorts = (count: number) => Array.from({ length: count - 1 }, (_, i) => `ether${i + 2}`);
+
+/** A sensible start for each use; every port can be changed after. */
+function defaultRoles(use: Use, count: number): Record<string, PortRole> {
+  const ports = lanPorts(count);
+  return Object.fromEntries(
+    ports.map((p, i) => [p, use === "pppoe" ? "pppoe" : use === "both" && i === ports.length - 1 ? "pppoe" : "hotspot"])
+  );
+}
 
 function StepDots({ current }: { current: Step }) {
   return (
@@ -48,20 +71,67 @@ function StepDots({ current }: { current: Step }) {
             >
               {s.n < current ? <IconCheck size={14} /> : s.n}
             </div>
-            <span
-              className={`text-xs font-medium ${
-                s.n <= current ? "text-slate-900 dark:text-white" : "text-slate-400"
-              }`}
-            >
-              {s.label}
-            </span>
+            <span className={`text-xs font-medium ${s.n <= current ? "text-slate-900 dark:text-white" : "text-slate-400"}`}>{s.label}</span>
           </div>
-          {i < STEPS.length - 1 && (
-            <div className={`mx-3 mb-5 h-0.5 w-16 ${s.n < current ? "bg-brand-600" : "bg-slate-200 dark:bg-obsidian-800"}`} />
-          )}
+          {i < STEPS.length - 1 && <div className={`mx-3 mb-5 h-0.5 w-12 sm:w-16 ${s.n < current ? "bg-brand-600" : "bg-slate-200 dark:bg-obsidian-800"}`} />}
         </div>
       ))}
     </div>
+  );
+}
+
+function Choice({
+  selected,
+  onClick,
+  title,
+  body,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  title: string;
+  body: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onClick}
+      className={`flex-1 rounded-xl border p-3.5 text-left transition-colors ${
+        selected
+          ? "border-brand-600 bg-brand-50 ring-1 ring-brand-600 dark:bg-brand-950/40"
+          : "border-slate-200 bg-white hover:border-slate-300 dark:border-obsidian-700 dark:bg-obsidian-900"
+      }`}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+        <span
+          className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+            selected ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 dark:border-obsidian-600"
+          }`}
+        >
+          {selected && <IconCheck size={10} />}
+        </span>
+        {title}
+      </span>
+      <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{body}</span>
+    </button>
+  );
+}
+
+function Chip({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+        selected
+          ? "border-brand-600 bg-brand-600 text-white"
+          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-obsidian-700 dark:bg-obsidian-900 dark:text-slate-300"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -72,60 +142,50 @@ export default function LinkRouterWizardPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
+  const [use, setUse] = useState<Use>("hotspot");
+  const [portCount, setPortCount] = useState<number>(5);
+  const [roles, setRoles] = useState<Record<string, PortRole>>(() => defaultRoles("hotspot", 5));
+
+  // Advanced — safe defaults for a normal setup.
   const [routerOsMajor, setRouterOsMajor] = useState<6 | 7 | null>(null);
+  const [blockTethering, setBlockTethering] = useState(false);
+  const [pppoeGatewayIp, setPppoeGatewayIp] = useState("10.10.0.1");
+  const [pppoePoolRange, setPppoePoolRange] = useState("10.10.0.2-10.10.255.254");
+
   const [created, setCreated] = useState<RouterRecord | null>(null);
   const [provisionToken, setProvisionToken] = useState<string | null>(null);
   const [provisioningScript, setProvisioningScript] = useState<string | null>(null);
-  const [waitingForCallback, setWaitingForCallback] = useState(true);
-  const [showManualFallback, setShowManualFallback] = useState(false);
-
-  // Manual-entry fallback fields — only used if the router can't reach this platform to call
-  // home (e.g. no outbound internet, or a private test router with no public/forwarded address).
-  const [manualHost, setManualHost] = useState("");
-  const [manualPort, setManualPort] = useState("8728");
-  const [manualUseTls, setManualUseTls] = useState(false);
-  const [manualUsername, setManualUsername] = useState("");
-  const [manualPassword, setManualPassword] = useState("");
-
-  // Port selection state — click to select, no typing needed!
-  const [hotspotPorts, setHotspotPorts] = useState<string[]>(["ether2", "ether3"]);
-  const [lanPort, setLanPort] = useState<string>("ether4");
-
-  const [pppoeEnabled, setPppoeEnabled] = useState(false);
-  const [pppoeInterface, setPppoeInterface] = useState("ether5");
-  const [pppoeGatewayIp, setPppoeGatewayIp] = useState("10.10.0.1");
-  const [pppoePoolRange, setPppoePoolRange] = useState("10.10.0.2-10.10.255.254");
-  const [blockTethering, setBlockTethering] = useState(false);
   const [oneLiner, setOneLiner] = useState<string>("");
+  const [waitedSeconds, setWaitedSeconds] = useState(0);
 
-  const toggleHotspotPort = (port: string) => {
-    setHotspotPorts((prev) => {
-      const exists = prev.includes(port);
-      if (exists) {
-        return prev.filter((p) => p !== port);
-      } else {
-        if (lanPort === port) setLanPort("none");
-        if (pppoeInterface === port) setPppoeInterface("");
-        return [...prev, port];
+  const ports = lanPorts(portCount);
+  const roleOf = (p: string): PortRole => roles[p] ?? "hotspot";
+  const pppoePorts = ports.filter((p) => roleOf(p) === "pppoe");
+  const officePort = ports.find((p) => roleOf(p) === "office") ?? null;
+  const hasPppoe = use !== "hotspot";
+  const hasHotspot = use !== "pppoe";
+  // The Wi-Fi always runs the hotspot (walk-in customers); PPPoE customers come in by cable.
+  const hotspotPorts = [...ports.filter((p) => roleOf(p) === "hotspot"), "wlan1"];
+  const roleChoices: PortRole[] = use === "hotspot" ? ["hotspot", "office"] : use === "pppoe" ? ["pppoe", "office"] : ["hotspot", "pppoe", "office"];
+
+  const chooseUse = (u: Use) => {
+    setUse(u);
+    setRoles(defaultRoles(u, portCount));
+  };
+  const choosePortCount = (n: number) => {
+    setPortCount(n);
+    // Keep what was already chosen for the ports that still exist.
+    setRoles((prev) => ({ ...defaultRoles(use, n), ...Object.fromEntries(Object.entries(prev).filter(([p]) => lanPorts(n).includes(p))) }));
+  };
+  const setRole = (port: string, role: PortRole) =>
+    setRoles((prev) => {
+      const next = { ...prev, [port]: role };
+      // One office port: choosing another hands the old one back to the router's main use.
+      if (role === "office") {
+        for (const p of Object.keys(next)) if (p !== port && next[p] === "office") next[p] = use === "pppoe" ? "pppoe" : "hotspot";
       }
+      return next;
     });
-  };
-
-  const selectLanPort = (port: string) => {
-    setLanPort(port);
-    if (port !== "none") {
-      setHotspotPorts((prev) => prev.filter((p) => p !== port));
-      if (pppoeInterface === port) setPppoeInterface("");
-    }
-  };
-
-  const selectPppoePort = (port: string) => {
-    setPppoeInterface(port);
-    if (port) {
-      setHotspotPorts((prev) => prev.filter((p) => p !== port));
-      if (lanPort === port) setLanPort("none");
-    }
-  };
 
   const createPending = useMutation({
     mutationFn: () =>
@@ -135,13 +195,9 @@ export default function LinkRouterWizardPage() {
           name,
           routerOsMajor,
           hotspotPorts,
-          lanPort: lanPort && lanPort !== "none" ? lanPort : null,
-          ...(pppoeEnabled && pppoeInterface.trim()
-            ? {
-                pppoeInterface: pppoeInterface.trim(),
-                pppoeGatewayIp: pppoeGatewayIp.trim(),
-                pppoePoolRange: pppoePoolRange.trim(),
-              }
+          lanPort: officePort,
+          ...(pppoePorts.length
+            ? { pppoeInterface: pppoePorts.join(","), pppoeGatewayIp: pppoeGatewayIp.trim(), pppoePoolRange: pppoePoolRange.trim() }
             : {}),
           blockTethering,
         }),
@@ -153,7 +209,7 @@ export default function LinkRouterWizardPage() {
       setStep(2);
       queryClient.invalidateQueries({ queryKey: ["routers"] });
     },
-    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to register router"),
+    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Could not add the router. Please try again."),
   });
 
   const loadProvisioningScript = useMutation({
@@ -163,80 +219,58 @@ export default function LinkRouterWizardPage() {
       ),
     onSuccess: (result) => {
       setProvisioningScript(result.script);
-      // Only ever the API's command: it carries this deployment's public URL. A hard-coded host here
-      // would send the router to the wrong server on any other deployment.
+      // Only ever the API's command: it carries this deployment's public URL.
       setOneLiner(result.oneLiner || result.fetchCommand || "");
     },
-    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to generate provisioning script"),
+    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Could not make the setup command. Please reload the page."),
   });
 
   useEffect(() => {
-    if (step === 2 && created && provisionToken && !provisioningScript) {
-      loadProvisioningScript.mutate();
-    }
+    if (step === 2 && created && provisionToken && !provisioningScript) loadProvisioningScript.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, created?.id]);
 
-  const checkLinked = useMutation({
-    mutationFn: () => apiFetch<RouterRecord>(`/api/v1/routers/${created!.id}`),
-    onSuccess: async (result) => {
-      if (result.host) {
-        // Host just appeared — the router's callback landed. Kick a real connectivity check so
-        // the status badge reflects reality immediately instead of waiting for the next
-        // background poll (apps/worker's poll-router-health runs on a 60s cadence).
-        await apiFetch(`/api/v1/routers/${result.id}/test-connection`, { method: "POST" }).catch(() => {});
-        const fresh = await apiFetch<RouterRecord>(`/api/v1/routers/${result.id}`);
-        setCreated(fresh);
-        setWaitingForCallback(false);
-        queryClient.invalidateQueries({ queryKey: ["routers"] });
-      } else {
-        setCreated(result);
-      }
-    },
-  });
-
-  // Poll for the router's callback rather than a fixed connectivity check — until `host` is
-  // populated there's nothing to dial yet (see completeRouterProvisioning in @mashupkgrid/network).
+  // Wait for the router to check in (its setup command calls back and fills in `host`), then move
+  // on by itself — nobody has to find a Continue button.
   useEffect(() => {
-    if (step !== 2 || !created || created.host) return;
+    if (step !== 2 || !created) return;
     let cancelled = false;
+    const started = Date.now();
     const poll = async () => {
       if (cancelled) return;
-      await checkLinked.mutateAsync().catch(() => {});
-      if (!cancelled && waitingForCallback) setTimeout(poll, 3000);
+      setWaitedSeconds(Math.round((Date.now() - started) / 1000));
+      try {
+        const result = await apiFetch<RouterRecord>(`/api/v1/routers/${created.id}`);
+        if (result.host) {
+          await apiFetch(`/api/v1/routers/${result.id}/test-connection`, { method: "POST" }).catch(() => {});
+          const fresh = await apiFetch<RouterRecord>(`/api/v1/routers/${result.id}`).catch(() => result);
+          if (cancelled) return;
+          setCreated(fresh);
+          queryClient.invalidateQueries({ queryKey: ["routers"] });
+          setStep(3);
+          return;
+        }
+      } catch {
+        // Keep waiting through a network blip.
+      }
+      if (!cancelled) setTimeout(poll, 3000);
     };
     poll();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, created?.id, waitingForCallback]);
+  }, [step, created?.id]);
 
-  const linkManually = useMutation({
-    mutationFn: () =>
-      apiFetch<RouterRecord>(`/api/v1/routers/${created!.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          host: manualHost,
-          apiPort: Number(manualPort),
-          useTls: manualUseTls,
-          username: manualUsername,
-          password: manualPassword,
-        }),
-      }),
-    onSuccess: (result) => {
-      setCreated(result);
-      setWaitingForCallback(false);
-      queryClient.invalidateQueries({ queryKey: ["routers"] });
-    },
-    onError: (err) => setError(err instanceof ApiRequestError ? err.message : "Failed to link router manually"),
-  });
-
-  const statusPill = created ? (
-    <Pill tone={created.status === "ONLINE" ? "good" : created.status === "DOWN" ? "bad" : created.status === "WARNING" ? "warn" : "neutral"}>
-      {created.status === "ONLINE" ? "Online" : created.status === "DOWN" ? "Offline" : created.status === "WARNING" ? "Degraded" : "Not checked yet"}
-    </Pill>
-  ) : null;
+  const downloadScript = () => {
+    if (!provisioningScript) return;
+    const url = URL.createObjectURL(new Blob([provisioningScript.replace(/\r?\n/g, "\r\n")], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "setup.rsc";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -245,7 +279,7 @@ export default function LinkRouterWizardPage() {
           ← Routers
         </Link>
         <div className="mt-2">
-          <PageHeader title="Link a MikroTik" description="Name it and paste one command into the router. It links itself, with no IP, port or password to type." />
+          <PageHeader title="Add a MikroTik router" description="Give it a name, paste one command into the router, and it sets itself up. No IP address, port or password to type." />
         </div>
       </div>
 
@@ -253,7 +287,6 @@ export default function LinkRouterWizardPage() {
 
       {step === 1 && (
         <Card>
-          <h2 className="mb-4 text-[15px] font-semibold text-slate-900 dark:text-white">Router details</h2>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -261,273 +294,146 @@ export default function LinkRouterWizardPage() {
               createPending.mutate();
             }}
           >
-            <Label htmlFor="name">Router name</Label>
-            <Input
-              id="name"
-              placeholder="e.g. Core-CCR2004-Nairobi"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-            <HintText>How this router is shown across the dashboard.</HintText>
-            <div className="mt-4">
-              <Label>{tr("RouterOS version")}</Label>
-              <div className="mt-1 flex flex-wrap gap-2" role="radiogroup" aria-label={tr("RouterOS version")}>
-                {([
-                  { v: null, label: tr("Not sure (detect)") },
-                  { v: 6, label: "RouterOS v6" },
-                  { v: 7, label: "RouterOS v7" },
-                ] as const).map((o) => (
-                  <button
-                    key={String(o.v)}
-                    type="button"
-                    role="radio"
-                    aria-checked={routerOsMajor === o.v}
-                    onClick={() => setRouterOsMajor(o.v)}
-                    className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
-                      routerOsMajor === o.v
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-obsidian-700 dark:bg-obsidian-950 dark:text-slate-200"
-                    }`}
-                  >
-                    {o.label}
-                  </button>
+            <Label htmlFor="name">1. Router name</Label>
+            <Input id="name" placeholder="e.g. Kahawa Shop, Main Office" value={name} onChange={(e) => setName(e.target.value)} required />
+            <HintText>Any name you&apos;ll recognise. Only you see it.</HintText>
+
+            <div className="mt-5">
+              <Label>2. What is this router for?</Label>
+              <div className="mt-1 flex flex-col gap-2 sm:flex-row" role="radiogroup" aria-label="What is this router for?">
+                <Choice
+                  selected={use === "hotspot"}
+                  onClick={() => chooseUse("hotspot")}
+                  title="Hotspot"
+                  body="Walk-in customers buy a voucher or pay by M-Pesa on the sign-in page."
+                />
+                <Choice
+                  selected={use === "pppoe"}
+                  onClick={() => chooseUse("pppoe")}
+                  title="PPPoE"
+                  body="Home or office customers on a monthly plan, with their own router."
+                />
+                <Choice selected={use === "both"} onClick={() => chooseUse("both")} title="Both" body="Hotspot on the Wi-Fi and some ports, PPPoE on the ports you choose." />
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <Label>3. How many ports does your router have?</Label>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {PORT_COUNTS.map((n) => (
+                  <Chip key={n} selected={portCount === n} onClick={() => choosePortCount(n)}>
+                    {n} ports
+                  </Chip>
                 ))}
               </div>
-              <HintText>
-                {tr("In WinBox: System > Resources > Version. v6 routers get no WireGuard remote access; v7 gets it and the newer Wi-Fi settings. If the router runs a different version, the script says so on screen and in the router's log.")}
-              </HintText>
+              <HintText>Count the ethernet sockets on the router (hAP lite: 4, hAP ac² or RB750: 5, RB4011: 10).</HintText>
             </div>
-            {/* Interactive Port Selection */}
-            <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-obsidian-800 dark:bg-obsidian-900/50">
-              <div className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-400">
-                  <IconRouter size={14} />
-                </span>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Port & Interface Roles (Click to Select)
-                </h3>
-              </div>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Easily designate port roles by clicking — no command line typing required.
-              </p>
 
-              {/* Visual Router Port Status Bar */}
-              <div className="mt-3.5 flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white p-2.5 dark:border-obsidian-800 dark:bg-obsidian-950">
-                <span className="flex items-center gap-1 rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
-                  ether1 (WAN Uplink)
-                </span>
-                {["ether2", "ether3", "ether4", "ether5", "sfp1", "wlan1"].map((p) => {
-                  const isHotspot = hotspotPorts.includes(p);
-                  const isLan = lanPort === p;
-                  const isPpp = pppoeEnabled && pppoeInterface === p;
-                  return (
-                    <span
-                      key={p}
-                      className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold transition-all ${
-                        isHotspot
-                          ? "bg-blue-600 text-white shadow-xs"
-                          : isLan
-                          ? "bg-emerald-600 text-white shadow-xs"
-                          : isPpp
-                          ? "bg-purple-600 text-white shadow-xs"
-                          : "bg-slate-100 text-slate-500 dark:bg-obsidian-800 dark:text-slate-400"
-                      }`}
+            {/* The ports, as the ISP will cable them: one drop-down per port. */}
+            <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-obsidian-800 dark:bg-obsidian-900/50">
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">4. What is each port for?</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {hasPppoe
+                  ? "Choose PPPoE for every port with a cable to your PPPoE customers (you can pick several)."
+                  : "Every port runs the hotspot. Change one to Office for your own PC or CCTV."}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-amber-300 bg-amber-100 px-2.5 py-2 text-xs dark:border-amber-800 dark:bg-amber-950/70">
+                  <span className="block font-semibold text-amber-900 dark:text-amber-200">ether1</span>
+                  <span className="block text-amber-800 dark:text-amber-300">Internet in (from your modem)</span>
+                </div>
+                {ports.map((p) => (
+                  <label key={p} className={`rounded-lg border px-2.5 py-2 text-xs ${ROLE_TONE[roleOf(p)]}`}>
+                    <span className="block font-semibold">{p}</span>
+                    <select
+                      aria-label={`What ${p} is for`}
+                      value={roleOf(p)}
+                      onChange={(e) => setRole(p, e.target.value as PortRole)}
+                      className="mt-1 w-full rounded-md border border-white/40 bg-white/15 px-1.5 py-1 text-xs font-medium text-white outline-none [&>option]:text-slate-900"
                     >
-                      {p}
-                      {isHotspot ? " (Hotspot)" : isLan ? " (Direct LAN)" : isPpp ? " (PPPoE)" : ""}
-                    </span>
-                  );
-                })}
-              </div>
-
-              {/* 1. Hotspot Ports Selection */}
-              <div className="mt-4">
-                <div className="flex items-center justify-between">
-                  <Label className="mb-0 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                    Hotspot Ports (Captive Portal & Wi-Fi APs)
-                  </Label>
-                  <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
-                    Click to toggle ports
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  Only devices plugged into these ports will see the voucher login portal.
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {["ether2", "ether3", "ether4", "ether5", "sfp1", "wlan1"].map((p) => {
-                    const selected = hotspotPorts.includes(p);
-                    const disabled = lanPort === p || (pppoeEnabled && pppoeInterface === p);
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => toggleHotspotPort(p)}
-                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
-                          selected
-                            ? "border-blue-600 bg-blue-50 text-blue-700 shadow-xs dark:border-blue-500 dark:bg-blue-950/70 dark:text-blue-300 font-semibold ring-1 ring-blue-500"
-                            : disabled
-                            ? "border-slate-200 bg-slate-100 text-slate-400 opacity-50 dark:border-obsidian-800 dark:bg-obsidian-800 cursor-not-allowed"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-obsidian-700 dark:bg-obsidian-900 dark:text-slate-300"
-                        }`}
-                      >
-                        {selected ? <IconCheck size={13} className="text-blue-600 dark:text-blue-400" /> : null}
-                        {p}
-                        {p === "wlan1" ? " (Built-in Wi-Fi)" : ""}
-                      </button>
-                    );
-                  })}
+                      {roleChoices.map((r) => (
+                        <option key={r} value={r}>
+                          {ROLE_LABEL[r]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+                <div className={`rounded-lg border px-2.5 py-2 text-xs ${ROLE_TONE.hotspot}`}>
+                  <span className="block font-semibold">Wi-Fi</span>
+                  <span className="block opacity-90">Hotspot</span>
                 </div>
               </div>
-
-              {/* 2. Direct LAN / Non-Hotspot Port Selection */}
-              <div className="mt-4 pt-3.5 border-t border-slate-200/80 dark:border-obsidian-800">
-                <div className="flex items-center justify-between">
-                  <Label className="mb-0 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                    Direct LAN Port (No Hotspot / No Voucher)
-                  </Label>
-                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                    Bypasses captive portal
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  Dedicated port for Office PC, CCTV cameras, or technician laptop (Subnet 192.168.99.1/24 with direct internet).
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {[
-                    { id: "none", label: "None (All on Hotspot)" },
-                    { id: "ether4", label: "ether4 (Recommended)" },
-                    { id: "ether5", label: "ether5" },
-                    { id: "ether3", label: "ether3" },
-                    { id: "ether2", label: "ether2" },
-                    { id: "sfp1", label: "sfp1" },
-                  ].map((item) => {
-                    const isSelected = lanPort === item.id || (!lanPort && item.id === "none");
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => selectLanPort(item.id)}
-                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
-                          isSelected
-                            ? "border-emerald-600 bg-emerald-50 text-emerald-800 shadow-xs dark:border-emerald-500 dark:bg-emerald-950/70 dark:text-emerald-300 font-semibold ring-1 ring-emerald-500"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-obsidian-700 dark:bg-obsidian-900 dark:text-slate-300"
-                        }`}
-                      >
-                        {isSelected && item.id !== "none" ? <IconCheck size={13} className="text-emerald-600 dark:text-emerald-400" /> : null}
-                        {item.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-xl border border-slate-200 p-4 dark:border-obsidian-800">
-              <label className="flex items-center gap-2.5">
-                <input
-                  type="checkbox"
-                  checked={blockTethering}
-                  onChange={(e) => setBlockTethering(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 dark:border-obsidian-700"
-                />
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Block voucher sharing over a phone hotspot
-                </span>
-              </label>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Stops one customer re-sharing their paid session to a whole room. Detection is by
-                TTL, so it can also block a customer whose own device legitimately sits behind a
-                travel router — leave it off unless sharing is actually costing you.
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                Using a VLAN switch? Add the router like this first, then create each VLAN on the{" "}
+                <Link href="/vlans" className="font-medium text-brand-600 underline dark:text-brand-400">
+                  VLANs page
+                </Link>
+                : every VLAN becomes its own hotspot or PPPoE network on the port your switch is in.
               </p>
             </div>
 
-            <div className="mt-3 rounded-xl border border-slate-200 p-4 dark:border-obsidian-800">
-              <label className="flex items-center gap-2.5">
-                <input
-                  type="checkbox"
-                  checked={pppoeEnabled}
-                  onChange={(e) => setPppoeEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 dark:border-obsidian-700"
-                />
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                  This router serves PPPoE subscribers
-                </span>
-              </label>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Leave off for a hotspot-only router. RADIUS authentication is configured either
-                way — this adds the PPPoE server that actually listens for subscribers.
-              </p>
-
-              {pppoeEnabled && (
-                <div className="mt-4 space-y-3">
-                  <div>
-                    <Label htmlFor="pppoeInterface">Click to select PPPoE port or VLAN</Label>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {["ether5", "ether4", "ether2", "sfp1", "vlan10", "vlan20", "vlan100"].map((iface) => {
-                        const isSelected = pppoeInterface === iface;
-                        return (
-                          <button
-                            key={iface}
-                            type="button"
-                            onClick={() => selectPppoePort(iface)}
-                            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
-                              isSelected
-                                ? "border-purple-600 bg-purple-50 text-purple-800 shadow-xs dark:border-purple-500 dark:bg-purple-950/70 dark:text-purple-300 font-semibold ring-1 ring-purple-500"
-                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-obsidian-700 dark:bg-obsidian-900 dark:text-slate-300"
-                            }`}
-                          >
-                            {isSelected ? <IconCheck size={13} className="text-purple-600 dark:text-purple-400" /> : null}
-                            {iface}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-2">
-                      <Input
-                        id="pppoeInterface"
-                        placeholder="Selected interface (e.g. ether5 or vlan20)"
-                        value={pppoeInterface}
-                        onChange={(e) => selectPppoePort(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      The port or VLAN facing your subscribers — not your uplink.
-                    </p>
+            <details className="mt-4 rounded-xl border border-slate-200 p-3.5 dark:border-obsidian-800">
+              <summary className="cursor-pointer select-none text-sm font-medium text-slate-700 dark:text-slate-300">
+                Advanced (optional — the defaults work for most routers)
+              </summary>
+              <div className="mt-4 space-y-5">
+                <div>
+                  <Label>RouterOS version</Label>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {([
+                      { v: null, label: "Detect automatically" },
+                      { v: 6, label: "v6" },
+                      { v: 7, label: "v7" },
+                    ] as const).map((o) => (
+                      <Chip key={String(o.v)} selected={routerOsMajor === o.v} onClick={() => setRouterOsMajor(o.v)}>
+                        {o.label}
+                      </Chip>
+                    ))}
                   </div>
+                  <HintText>Leave on &ldquo;Detect automatically&rdquo; unless you know it.</HintText>
+                </div>
+
+                {hasHotspot && (
+                  <label className="flex items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={blockTethering}
+                      onChange={(e) => setBlockTethering(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-obsidian-700"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-slate-900 dark:text-white">Block voucher sharing</span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400">
+                        Stops one customer sharing their paid Wi-Fi from their phone&apos;s hotspot. Can block some travel routers; leave off unless sharing costs you.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                {hasPppoe && (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
-                      <Label htmlFor="pppoeGatewayIp">Gateway address</Label>
-                      <Input
-                        id="pppoeGatewayIp"
-                        placeholder="10.10.0.1"
-                        value={pppoeGatewayIp}
-                        onChange={(e) => setPppoeGatewayIp(e.target.value)}
-                      />
+                      <Label htmlFor="pppoeGatewayIp">PPPoE gateway address</Label>
+                      <Input id="pppoeGatewayIp" value={pppoeGatewayIp} onChange={(e) => setPppoeGatewayIp(e.target.value)} />
                     </div>
                     <div>
-                      <Label htmlFor="pppoePoolRange">Subscriber address range</Label>
-                      <Input
-                        id="pppoePoolRange"
-                        placeholder="10.10.0.2-10.10.255.254"
-                        value={pppoePoolRange}
-                        onChange={(e) => setPppoePoolRange(e.target.value)}
-                      />
+                      <Label htmlFor="pppoePoolRange">PPPoE customer addresses</Label>
+                      <Input id="pppoePoolRange" value={pppoePoolRange} onChange={(e) => setPppoePoolRange(e.target.value)} />
                     </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 sm:col-span-2">
+                      Only change these if 10.10.x.x is already used on your network.
+                    </p>
                   </div>
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    Pick a range that does not overlap anything already on this network — the
-                    gateway must sit outside the range.
-                  </p>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            </details>
 
             {error && <ErrorText>{error}</ErrorText>}
+            {hasPppoe && pppoePorts.length === 0 && <ErrorText>Set at least one port to &ldquo;PPPoE customers&rdquo;.</ErrorText>}
             <div className="mt-5 flex justify-end">
-              <Button type="submit" disabled={createPending.isPending} className="gap-1.5">
-                {createPending.isPending ? "Registering..." : "Continue"} <IconChevronRight size={14} />
+              <Button type="submit" disabled={createPending.isPending || !name.trim() || (hasPppoe && pppoePorts.length === 0)} className="gap-1.5">
+                {createPending.isPending ? "Adding…" : "Next: get the command"} <IconChevronRight size={14} />
               </Button>
             </div>
           </form>
@@ -536,143 +442,57 @@ export default function LinkRouterWizardPage() {
 
       {step === 2 && created && (
         <Card>
-          <h2 className="mb-1 text-[15px] font-semibold text-slate-900 dark:text-white">Run the setup command</h2>
-          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-            In WinBox, open <span className="text-slate-300">New Terminal</span> on <span className="font-medium text-slate-200">{created.name}</span>, paste
-            this command and press Enter. It sets up the API user, RADIUS, the hotspot and its login page, DNS and NAT, and the walled garden for M-Pesa,
-            Paystack and Pesapal, then links the router. It&apos;s the only script you need.
-          </p>
+          <h2 className="mb-3 text-[15px] font-semibold text-slate-900 dark:text-white">Paste this into {created.name}</h2>
+          <ol className="mb-4 list-decimal space-y-1.5 pl-5 text-sm text-slate-600 dark:text-slate-300">
+            <li>
+              Plug your internet cable into <b>port 1 (ether1)</b> of the router.
+            </li>
+            <li>
+              Open <b>WinBox</b>, connect to the router, and click <b>New Terminal</b>.
+            </li>
+            <li>
+              Click <b>Copy</b> below, paste it into the terminal and press <b>Enter</b>.
+            </li>
+          </ol>
 
-          <CodeBlock code={oneLiner || null} label="Setup command (single use)" maxHeight="8rem" />
+          <CodeBlock code={oneLiner || null} label="Setup command — use it once, for this router only" maxHeight="8rem" />
 
-          {provisioningScript && (
-            <details className="mt-3 rounded-lg border border-obsidian-800 p-3">
-              <summary className="cursor-pointer select-none text-sm text-slate-300 hover:text-white">
-                Command fails with &ldquo;Network unreachable&rdquo; or &ldquo;resolving error&rdquo;?
-              </summary>
-              <div className="mt-3 space-y-3 text-sm text-slate-400">
-                <p>
-                  The router can&apos;t reach MashupHost yet. First check the cable from your modem or main router goes into the hAP&apos;s{" "}
-                  <span className="text-slate-200">port 1 (ether1)</span> and that port&apos;s light is on. Then set it up from a file instead. The file
-                  also fixes the internet port, and the router links itself once it&apos;s online.
-                </p>
-                <ol className="list-decimal space-y-1 pl-5">
-                  <li>Download the setup file.</li>
-                  <li>
-                    In WinBox, open <span className="text-slate-200">Files</span> and drag <span className="font-mono text-slate-300">setup.rsc</span> into
-                    it.
-                  </li>
-                  <li>
-                    In <span className="text-slate-200">New Terminal</span>, run <span className="font-mono text-slate-300">/import setup.rsc</span>.
-                  </li>
-                </ol>
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-lg border border-obsidian-700 bg-obsidian-900 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-obsidian-800"
-                  onClick={() => {
-                    const url = URL.createObjectURL(new Blob([provisioningScript.replace(/\r?\n/g, "\r\n")], { type: "text/plain" }));
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "setup.rsc";
-                    a.click();
-                    setTimeout(() => URL.revokeObjectURL(url), 1000);
-                  }}
-                >
-                  Download setup.rsc
-                </button>
-              </div>
-            </details>
+          <div className="my-4">
+            <Notice tone="warn">
+              <span className="flex items-center gap-2">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-300/60 border-t-transparent" aria-hidden="true" />
+                Waiting for the router… this page moves on by itself when it&apos;s linked (usually under a minute).
+              </span>
+            </Notice>
+          </div>
+
+          {waitedSeconds >= 90 && (
+            <div className="mb-4 rounded-lg border border-slate-200 p-3.5 text-sm text-slate-600 dark:border-obsidian-800 dark:text-slate-300">
+              <p className="font-medium text-slate-900 dark:text-white">Taking a while? Check these:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>The terminal showed no red error. If it said &ldquo;Network unreachable&rdquo; or &ldquo;resolving error&rdquo;, the router has no internet: check the cable is in port 1 and its light is on.</li>
+                <li>You pasted the whole command and pressed Enter.</li>
+                <li>
+                  Still stuck? Use the setup file instead: download it, drag <span className="font-mono">setup.rsc</span> into WinBox → Files, then run{" "}
+                  <span className="font-mono">/import setup.rsc</span> in New Terminal.{" "}
+                  <button type="button" onClick={downloadScript} disabled={!provisioningScript} className="font-medium text-brand-600 underline dark:text-brand-400">
+                    Download setup.rsc
+                  </button>
+                </li>
+              </ul>
+            </div>
           )}
 
           {provisioningScript && (
-            <details className="mt-3">
-              <summary className="cursor-pointer select-none text-sm text-slate-400 hover:text-white">Show the full script it runs</summary>
+            <details>
+              <summary className="cursor-pointer select-none text-xs text-slate-400 hover:text-slate-200">Show everything the command sets up</summary>
               <div className="mt-2">
                 <CodeBlock code={provisioningScript} label="setup.rsc" maxHeight="16rem" />
               </div>
             </details>
           )}
 
-          <div className="my-4">
-            {created.host ? (
-              <Notice tone="good">
-                <div className="flex items-center justify-between gap-3">
-                  <span>
-                    Linked from <span className="font-mono">{created.host}</span>.
-                  </span>
-                  {statusPill}
-                </div>
-              </Notice>
-            ) : (
-              <Notice tone="warn">
-                <span className="flex items-center gap-2">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-300/60 border-t-transparent" aria-hidden="true" />
-                  Waiting for the router to check in…
-                </span>
-              </Notice>
-            )}
-          </div>
-
-          {!created.host && (
-            <button
-              type="button"
-              className="mb-4 text-xs font-medium text-slate-500 underline hover:text-slate-700 dark:hover:text-slate-300"
-              onClick={() => setShowManualFallback((v) => !v)}
-            >
-              {showManualFallback ? "Hide manual entry" : "This router can't reach the platform — link it manually instead"}
-            </button>
-          )}
-
-          {showManualFallback && !created.host && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setError(null);
-                linkManually.mutate();
-              }}
-              className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3.5 dark:border-obsidian-800 sm:grid-cols-2"
-            >
-              <div>
-                <Label htmlFor="manualHost">Host / Public IP</Label>
-                <Input id="manualHost" placeholder="192.168.88.1" value={manualHost} onChange={(e) => setManualHost(e.target.value)} required />
-              </div>
-              <div>
-                <Label htmlFor="manualPort">API port</Label>
-                <Input id="manualPort" type="number" value={manualPort} onChange={(e) => setManualPort(e.target.value)} required />
-              </div>
-              <div>
-                <Label htmlFor="manualUsername">API username</Label>
-                <Input id="manualUsername" value={manualUsername} onChange={(e) => setManualUsername(e.target.value)} required />
-              </div>
-              <div>
-                <Label htmlFor="manualPassword">API password</Label>
-                <Input id="manualPassword" type="password" value={manualPassword} onChange={(e) => setManualPassword(e.target.value)} required />
-              </div>
-              <div className="flex items-center gap-2 sm:col-span-2">
-                <input
-                  id="manualUseTls"
-                  type="checkbox"
-                  checked={manualUseTls}
-                  onChange={(e) => setManualUseTls(e.target.checked)}
-                  className="h-4 w-4 rounded text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-obsidian-700"
-                />
-                <Label htmlFor="manualUseTls" className="!mb-0 cursor-pointer">Use TLS (port 8729)</Label>
-              </div>
-              <div className="sm:col-span-2">
-                <Button type="submit" disabled={linkManually.isPending} className="text-sm">
-                  {linkManually.isPending ? "Linking..." : "Link manually"}
-                </Button>
-              </div>
-            </form>
-          )}
-
           {error && <ErrorText>{error}</ErrorText>}
-
-          <div className="flex justify-end">
-            <Button onClick={() => setStep(3)} disabled={!created.host} className="gap-1.5">
-              Continue <IconChevronRight size={14} />
-            </Button>
-          </div>
         </Card>
       )}
 
@@ -682,15 +502,46 @@ export default function LinkRouterWizardPage() {
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
               <IconCheck size={22} />
             </div>
-            <h2 className="mb-1 font-semibold text-slate-900 dark:text-white">{created.name} is linked</h2>
-            <p className="mb-6 text-sm text-slate-500 dark:text-slate-400">
-              Next, set up your hotspot packages, or add PPPoE customers.
+            <h2 className="mb-1 flex items-center justify-center gap-2 font-semibold text-slate-900 dark:text-white">
+              {created.name} is linked <Pill tone="good">Online</Pill>
+            </h2>
+            <p className="mx-auto mb-6 max-w-md text-sm text-slate-500 dark:text-slate-400">
+              It updates and repairs itself from now on. What&apos;s next:
             </p>
-            <div className="flex justify-center gap-2">
-              <Button variant="secondary" onClick={() => router.push("/vouchers")}>
-                Set up Hotspot
+            <div className="mx-auto max-w-md space-y-2 text-left text-sm">
+              {hasHotspot && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/vouchers")}
+                  className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3.5 py-2.5 hover:border-slate-300 dark:border-obsidian-700"
+                >
+                  <span>
+                    <span className="block font-medium text-slate-900 dark:text-white">Hotspot: set your prices</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">Add packages like &ldquo;1 hour – KSh 10&rdquo;. Then connect a phone to the Wi-Fi to test.</span>
+                  </span>
+                  <IconChevronRight size={14} />
+                </button>
+              )}
+              {hasPppoe && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/packages")}
+                  className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3.5 py-2.5 hover:border-slate-300 dark:border-obsidian-700"
+                >
+                  <span>
+                    <span className="block font-medium text-slate-900 dark:text-white">PPPoE: add a monthly plan, then a customer</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">
+                      Each customer gets a username and password to type into their own router (WAN → PPPoE).
+                    </span>
+                  </span>
+                  <IconChevronRight size={14} />
+                </button>
+              )}
+            </div>
+            <div className="mt-6">
+              <Button variant="secondary" onClick={() => router.push("/routers")}>
+                Go to Routers
               </Button>
-              <Button onClick={() => router.push("/routers")}>Go to Routers</Button>
             </div>
           </div>
         </Card>

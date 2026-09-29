@@ -1,6 +1,7 @@
 import { buildApp, getPort } from "./app.js";
 import { env } from "@mashupkgrid/config";
 import { syncWireguardPeersFromDatabase } from "@mashupkgrid/network";
+import { ensureDefaultPlans } from "./lib/default-plans.js";
 
 async function main() {
   const app = await buildApp();
@@ -20,6 +21,13 @@ async function main() {
       if (restored > 0) app.log.info(`Restored ${restored} WireGuard peer(s) from the database`);
     })
     .catch((err) => app.log.warn({ err }, "WireGuard peer replay failed; remote access may need re-registering"));
+
+  // ISPs can upgrade from day one: a platform with no subscription plans gets a starting set.
+  ensureDefaultPlans()
+    .then((created) => {
+      if (created > 0) app.log.info(`Created ${created} default subscription plan(s): edit them under Subscription plans`);
+    })
+    .catch((err) => app.log.warn({ err }, "Could not create the default subscription plans"));
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {

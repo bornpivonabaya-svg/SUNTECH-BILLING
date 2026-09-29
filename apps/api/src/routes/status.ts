@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "@mashupkgrid/database";
 import { successResponse, NotFoundError } from "@mashupkgrid/shared";
+import { heartbeatLateWindowMs } from "@mashupkgrid/network";
 import { getCurrentMaintenanceState } from "../lib/maintenance-state.js";
 
 /**
@@ -10,7 +11,10 @@ import { getCurrentMaintenanceState } from "../lib/maintenance-state.js";
  * linked from an ISP's WhatsApp status or website so customers check here before calling.
  */
 
-const STALE_AFTER_MS = 5 * 60_000;
+/** Silent this long and a site shows as down: 5 minutes, or 4 check-ins on a small router that
+ *  reports every 5 minutes (heartbeat-interval.ts). */
+const staleAfterMs = (router: { memoryTotalBytes: bigint | null; boardName: string | null }) =>
+  Math.max(5 * 60_000, heartbeatLateWindowMs(router));
 
 export async function statusRoutes(app: FastifyInstance): Promise<void> {
   app.get("/:tenantSlug", { config: { audience: "public" } }, async (request, reply) => {
@@ -24,13 +28,13 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
 
     const routers = await prisma.router.findMany({
       where: { tenantId: tenant.id, deletedAt: null },
-      select: { id: true, name: true, siteName: true, status: true, lastSeenAt: true, provisionedAt: true },
+      select: { id: true, name: true, siteName: true, status: true, lastSeenAt: true, provisionedAt: true, memoryTotalBytes: true, boardName: true },
       orderBy: [{ siteName: "asc" }, { name: "asc" }],
     });
     const now = Date.now();
     const sites = routers.map((r) => {
       const seen = r.lastSeenAt?.getTime() ?? 0;
-      const online = r.status === "ONLINE" && now - seen < STALE_AFTER_MS;
+      const online = r.status === "ONLINE" && now - seen < staleAfterMs(r);
       const never = !r.provisionedAt && !r.lastSeenAt;
       return {
         id: r.id,

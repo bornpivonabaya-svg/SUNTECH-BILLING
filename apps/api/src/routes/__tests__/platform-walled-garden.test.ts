@@ -79,7 +79,7 @@ describe("platform walled garden", () => {
   });
 
   it("refuses a host that is already built in", async () => {
-    const res = await app.inject({ method: "POST", url: "/api/v1/platform/walled-garden", headers: await adminAuth(), payload: { host: "*.safaricom.co.ke" } });
+    const res = await app.inject({ method: "POST", url: "/api/v1/platform/walled-garden", headers: await adminAuth(), payload: { host: "*.paystack.com" } });
     expect(res.statusCode).toBe(409);
   });
 

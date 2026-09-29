@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHeartbeatReport, parseHealthSensors, parseHeartbeatReport, parseUptimeSeconds, parseVpnReport, parseHotspotCheck, hotspotProblems } from "../heartbeat-report.js";
+import { isHeartbeatReport, parseHealthSensors, parseHeartbeatReport, parseUptimeSeconds, parseVpnReport, parseHotspotCheck, hotspotProblems, withRadiusTrend } from "../heartbeat-report.js";
 
 // Built exactly as the router's heartbeat script builds it (buildHeartbeatScript).
 const v7Body =
@@ -84,6 +84,9 @@ describe("the router's hotspot self-check", () => {
     expect(hotspotProblems({ srv: 1, hosts: 2, leases: 2, dnsnat: 2, login: 1, radios: 1, garden: 2, ping: 2, dns: 1 })).toEqual([]);
     const codes = (c: Parameters<typeof hotspotProblems>[0]) => hotspotProblems(c).map((p) => p.code);
     expect(codes({ ping: 0, dns: 0 })).toEqual(["no-internet", "no-dns"]);
+    // The report itself came over the internet: an unanswered ping with DNS working is just an ISP
+    // or modem that blocks ping.
+    expect(codes({ ping: 0, dns: 1 })).toEqual([]);
     expect(codes({ srv: 0, login: 0, radios: 0, garden: 0 })).toEqual(["no-hotspot", "no-login-page", "wifi-not-bridged", "no-walled-garden"]);
     expect(codes({ dnsnat: 240 })).toEqual(["dns-rules-piled"]);
     expect(codes({ srv: 1, leases: 3, hosts: 0 })).toEqual(["hosts-bypass"]);
@@ -98,5 +101,44 @@ describe("the hotspot check's page and RADIUS readings", () => {
     expect(hotspotProblems(check).map((p) => p.code)).toEqual(["login-page-broken", "radius-silent"]);
     expect(parseHotspotCheck("dir=../../etc;srv=1")).toEqual({ srv: 1 });
     expect(hotspotProblems({ lsize: 5400, rreq: 9, racc: 3, rrej: 6, rto: 2 })).toEqual([]);
+  });
+});
+
+describe("RADIUS timing out right now, not since the router started", () => {
+  const codes = (c: Parameters<typeof hotspotProblems>[0]) => hotspotProblems(c).map((p) => p.code);
+
+  it("clears once the timeouts stop, even though the router's counters still show them", () => {
+    // Six timeouts while the router was being set up, none since.
+    const before = { rreq: 6, racc: 0, rrej: 0, rto: 6 };
+    const now = withRadiusTrend({ rreq: 6, racc: 0, rrej: 0, rto: 6 }, before);
+    expect(now.rsilent).toBe(0);
+    expect(codes(now)).toEqual([]);
+  });
+
+  it("warns while new timeouts keep coming with no answer", () => {
+    const now = withRadiusTrend({ rreq: 9, racc: 0, rrej: 0, rto: 9 }, { rreq: 6, racc: 0, rrej: 0, rto: 6 });
+    expect(codes(now)).toEqual(["radius-silent"]);
+  });
+
+  it("stays quiet when answers came too (a single lost packet)", () => {
+    expect(codes(withRadiusTrend({ rreq: 20, racc: 5, rrej: 3, rto: 2 }, { rreq: 10, racc: 2, rrej: 1, rto: 1 }))).toEqual([]);
+  });
+
+  it("uses the counters alone after a reboot or on the first report", () => {
+    expect(codes(withRadiusTrend({ rreq: 3, racc: 0, rrej: 0, rto: 3 }, { rreq: 40, racc: 30, rrej: 0, rto: 10 }))).toEqual(["radius-silent"]);
+    expect(codes(withRadiusTrend({ rreq: 3, racc: 0, rrej: 0, rto: 3 }, null))).toEqual(["radius-silent"]);
+    expect(codes(withRadiusTrend({ rreq: 3, racc: 1, rrej: 0, rto: 2 }, null))).toEqual([]);
+  });
+});
+
+describe("the router's WireGuard key in its report", () => {
+  it("reads it, turning the '+' the raw form body made a space back into '+'", () => {
+    const key = "aB+cDeFgHiJkLmNoPqRsTuVwXyZ0123456789/abcdE=";
+    const body = `cpu=3&wgkey=${key.replace(/\+/g, " ")}`;
+    expect(parseHeartbeatReport(body).wgPublicKey).toBe(key);
+  });
+  it("ignores anything that isn't a WireGuard key", () => {
+    expect(parseHeartbeatReport("cpu=3&wgkey=nope").wgPublicKey).toBeUndefined();
+    expect(parseHeartbeatReport("cpu=3&wgkey=").wgPublicKey).toBeUndefined();
   });
 });

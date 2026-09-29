@@ -61,7 +61,7 @@ import { leadRoutes } from "./routes/leads.js";
 import { mfaRoutes } from "./routes/mfa.js";
 import { accountingRoutes } from "./routes/accounting.js";
 import { tenantWalledGardenRoutes } from "./routes/tenant-walled-garden.js";
-import { planRoutes } from "./routes/plans.js";
+import { planRoutes, publicConfigRoutes, publicPlanRoutes } from "./routes/plans.js";
 import { tenantBillingRoutes } from "./routes/tenant-billing.js";
 import { landingContentRoutes } from "./routes/landing-content.js";
 import { customerPortalRoutes } from "./routes/customer-portal.js";
@@ -165,6 +165,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(accountingRoutes, { prefix: "/api/v1/accounting" });
   await app.register(tenantWalledGardenRoutes, { prefix: "/api/v1/walled-garden" });
   await app.register(planRoutes, { prefix: "/api/v1/platform/plans" });
+  await app.register(publicPlanRoutes, { prefix: "/api/v1/public/plans" });
+  await app.register(publicConfigRoutes, { prefix: "/api/v1/public/config" });
   await app.register(tenantBillingRoutes, { prefix: "/api/v1/billing" });
   await app.register(landingContentRoutes, { prefix: "/api/v1/landing-content" });
   await app.register(productRoutes, { prefix: "/api/v1/products" });

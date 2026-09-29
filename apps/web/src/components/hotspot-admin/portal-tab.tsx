@@ -8,6 +8,7 @@ import { HintText, Input, Label } from "@/components/ui";
 import { Notice, Panel, darkButton } from "@/components/dashboard/surface";
 import { THEME_CATALOG, DEFAULT_THEME_ID, type ThemeId } from "@/components/hotspot/themes";
 import { tr } from "@/lib/tr";
+import { usePortalBase } from "@/lib/portal-url";
 
 interface PortalConfig {
   activeThemeId?: string;
@@ -54,11 +55,11 @@ export function PortalTab({ tenantSlug }: { tenantSlug: string }) {
     setInstallationFee(config.installationFee ?? "");
   }, [config]);
 
+  // The captive portal's address comes from the API's settings (see usePortalBase).
+  const portalBase = usePortalBase();
   useEffect(() => {
-    // Local dev serves the portal from this app; everywhere else it's the captive portal domain.
-    const local = /^(localhost|127\.0\.0\.1|\d{1,3}(\.\d{1,3}){3})$/.test(window.location.hostname);
-    setPortalUrl(`${local ? window.location.origin : "https://captive.mashuphost.tech"}/hotspot/${tenantSlug}`);
-  }, [tenantSlug]);
+    setPortalUrl(`${portalBase}/hotspot/${tenantSlug}`);
+  }, [portalBase, tenantSlug]);
 
   const save = async (e?: FormEvent) => {
     e?.preventDefault();

@@ -11,32 +11,86 @@ function sanitizeForScript(value: string): string {
   return value.replace(/[^\w .-]/g, "").trim() || "router";
 }
 
-/** Every third-party host an unauthenticated hotspot client must reach BEFORE it can pay and
- *  log in. Derived from what packages/payments actually calls, not guesswork:
+/** Card-payment hosts an unpaid customer must reach to pay by card, by gateway. Only ISPs that
+ *  switched that gateway on get them (see hotspotWalledGardenHosts): every walled-garden name is a
+ *  hole a "free browsing" app can claim to be visiting, so a hotspot that only takes M-Pesa, whose
+ *  STK push goes server to server, needs none of them.
  *
- *  - Safaricom / M-Pesa (packages/payments/src/mpesa) — the STK push itself is server-to-server,
- *    but the customer's own M-Pesa confirmation and any Daraja-hosted fallback page are not.
- *  - Paystack (packages/payments/src/paystack) — the customer is redirected to Paystack's hosted
- *    checkout, which pulls scripts from js.paystack.co and short-links through pstk.it.
- *  - Pesapal (packages/payments/src/pesapal) — same pattern, hosted checkout on pay.pesapal.com.
- *  - The 3-D Secure step-up hosts. A card payment that passes checkout but cannot reach its
- *    issuer's ACS silently fails at the last step, which reads to the customer as "the payment
- *    hung" — the single most confusing failure in a captive portal, since they have no way to
- *    reach a support page either.
+ *  - Paystack (packages/payments/src/paystack): hosted checkout, scripts from js.paystack.co,
+ *    short links through pstk.it.
+ *  - Pesapal (packages/payments/src/pesapal): hosted checkout on pay.pesapal.com.
+ *  - Either: the 3-D Secure step-up hosts. A card payment that cannot reach its issuer's ACS
+ *    fails silently at the last step.
  *
- *  Wildcards throughout: every one of these is CDN-fronted with rotating addresses, so pinning
- *  exact hosts is what breaks the moment a provider re-points a record. */
+ *  Wildcards: every one of these is CDN-fronted with rotating addresses. */
+export type CardGateway = "PAYSTACK" | "PESAPAL";
+const CARD_3DS_HOSTS = ["*.visa.com", "*.mastercard.com", "*.cardinalcommerce.com", "*.modirum.com"] as const;
+export const CARD_GATEWAY_WALLED_GARDEN_HOSTS: Record<CardGateway, readonly string[]> = {
+  PAYSTACK: ["*.paystack.com", "*.paystack.co", "*.pstk.it"],
+  PESAPAL: ["*.pesapal.com"],
+};
+/** Every card host any ISP may need, for display on the super admin's walled-garden page. */
 export const PAYMENT_GATEWAY_WALLED_GARDEN_HOSTS = [
-  "*.safaricom.co.ke",
-  "*.paystack.com",
-  "*.paystack.co",
-  "*.pstk.it",
-  "*.pesapal.com",
-  "*.visa.com",
-  "*.mastercard.com",
-  "*.cardinalcommerce.com",
-  "*.modirum.com",
+  ...CARD_GATEWAY_WALLED_GARDEN_HOSTS.PAYSTACK,
+  ...CARD_GATEWAY_WALLED_GARDEN_HOSTS.PESAPAL,
+  ...CARD_3DS_HOSTS,
 ] as const;
+
+/** The card hosts for the gateways an ISP uses; none at all for an M-Pesa-only hotspot. */
+export function cardGatewayHosts(gateways: readonly CardGateway[] = []): string[] {
+  const hosts = gateways.flatMap((g) => CARD_GATEWAY_WALLED_GARDEN_HOSTS[g] ?? []);
+  return hosts.length ? [...hosts, ...CARD_3DS_HOSTS] : [];
+}
+
+/**
+ * Everything one ISP's routers let an unpaid device reach: the portal and API by exact name, the
+ * ISP's own portal domains, the card gateways it uses, and hosts a super admin or the ISP allowed.
+ * Exact names on purpose. The router checks those by the address it resolves itself, but a
+ * wildcard ("*.mashuphost.tech", "*.safaricom.co.ke") is matched on the name a device claims to
+ * visit, which a tunnel app fakes; and mashuphost.tech itself is behind Cloudflare's proxy, so
+ * allowing it opened every site on Cloudflare. Neither is needed before payment.
+ */
+export function hotspotWalledGardenHosts(opts: {
+  serverHost?: string;
+  apiHost: string;
+  portalHost: string;
+  portalDomains?: string[];
+  cardGateways?: readonly CardGateway[];
+  extraHosts?: string[];
+}): string[] {
+  const hosts = [
+    opts.serverHost ?? "",
+    opts.portalHost,
+    opts.apiHost,
+    ...(opts.portalDomains ?? []).map(hostFromUrl),
+    ...cardGatewayHosts(opts.cardGateways),
+    ...(opts.extraHosts ?? []),
+  ];
+  return [...new Set(hosts.map((h) => h.trim().toLowerCase()).filter(Boolean))];
+}
+
+/** What an unpaid device may do with a walled-garden address: open web pages, nothing else. An
+ *  entry with no protocol opened those servers on every port and protocol, which "free browsing"
+ *  VPN apps (WireGuard, OpenVPN over UDP, Cloudflare WARP…) used to get online without paying. */
+export const WEB_ONLY = "protocol=tcp dst-port=80,443";
+
+/**
+ * Stops DNS tunnels (SlowDNS, dnstt, iodine) for devices that have not paid. Every phone's DNS
+ * goes to the router, which answers any name, so a tunnel app could carry a whole connection
+ * inside lookups for its own domain. For unpaid devices only (hotspot=!auth — paying customers
+ * are never touched): oversized lookups are dropped (a tunnel packs data into long names; a
+ * normal lookup is well under 220 bytes), at most 20 a second per device with a burst of 100
+ * (plenty to open the sign-in and payment pages, far too few to carry a tunnel), and no DNS over
+ * TCP. pre-hs-input is the chain the hotspot keeps for exactly this: it runs before the hotspot's
+ * own rules for every packet a hotspot device sends to the router.
+ */
+export const UNPAID_DNS_COMMENT = "MASHUPKGRID UNPAID DNS";
+export const UNPAID_DNS_RULES = [
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 packet-size=220-65535 action=drop comment="${UNPAID_DNS_COMMENT}"`,
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 dst-limit=20,100,src-address/1m action=accept comment="${UNPAID_DNS_COMMENT}"`,
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=udp dst-port=53,64872 action=drop comment="${UNPAID_DNS_COMMENT}"`,
+  `/ip firewall filter add chain=pre-hs-input hotspot=!auth protocol=tcp dst-port=53 action=drop comment="${UNPAID_DNS_COMMENT}"`,
+];
 
 /** RouterOS splits the walled garden across two menus and BOTH are needed.
  *  `/ip hotspot walled-garden` is the HTTP-proxy-level menu: it can match a Host header, but only
@@ -63,14 +117,14 @@ function walledGardenLines(hosts: readonly string[]): string {
     // used to skip everything after it — the login page, the heartbeat and the VPN — leaving a
     // router that linked once and then went silent.
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
-      lines.push(`:do {/ip hotspot walled-garden ip add dst-address=${host} action=accept comment="MASHUPKGRID"} on-error={}`);
+      lines.push(`:do {/ip hotspot walled-garden ip add dst-address=${host} ${WEB_ONLY} action=accept comment="MASHUPKGRID"} on-error={}`);
       continue;
     }
     lines.push(`:do {/ip hotspot walled-garden add dst-host=${host} action=allow comment="MASHUPKGRID"} on-error={}`);
     // The IP walled garden resolves dst-host to addresses and does not take wildcards; the HTTP
     // walled garden above already covers "*." names.
     if (!host.includes("*")) {
-      lines.push(`:do {/ip hotspot walled-garden ip add dst-host=${host} action=accept comment="MASHUPKGRID"} on-error={}`);
+      lines.push(`:do {/ip hotspot walled-garden ip add dst-host=${host} ${WEB_ONLY} action=accept comment="MASHUPKGRID"} on-error={}`);
     }
   }
   return lines.join("\n");
@@ -83,39 +137,6 @@ function hostFromUrl(value: string): string {
   } catch {
     return value.replace(/^https?:\/\//, "").split("/")[0]!.split(":")[0]!;
   }
-}
-
-/** Two-part public suffixes this platform actually meets. Kenya is the primary market (see the
- *  Tenant model's KES/Africa-Nairobi defaults) where "acme.co.ke" is the registrable domain, not
- *  "co.ke" — getting that wrong would emit a "*.co.ke" walled-garden rule, opening the hotspot
- *  to an entire country's namespace. Not a full public-suffix list, and deliberately so: an
- *  unlisted suffix falls back to the last two labels, which is merely narrower than ideal
- *  (a redundant exact-host entry) rather than dangerously wide. */
-const MULTI_PART_TLDS = new Set([
-  "co.ke", "or.ke", "ne.ke", "ac.ke", "go.ke", "sc.ke", "me.ke", "mobi.ke", "info.ke",
-  "co.tz", "co.ug", "co.rw", "co.za", "org.za", "com.ng", "com.gh", "co.zm", "co.zw",
-  "co.uk", "org.uk", "ac.uk", "com.au", "co.nz", "com.br", "co.in",
-]);
-
-/** The registrable domain — "api.mashuphost.tech" and "portal.acme.co.ke" reduce to
- *  "mashuphost.tech" and "acme.co.ke" respectively. */
-function registrableDomain(host: string): string {
-  const parts = host.split(".");
-  if (parts.length <= 2) return host;
-  const labelCount = MULTI_PART_TLDS.has(parts.slice(-2).join(".")) ? 3 : 2;
-  return parts.slice(-labelCount).join(".");
-}
-
-/** A host plus one wildcard covering its registrable domain. The exact host alone is not enough:
- *  a portal behind a CDN (mashuphost.tech sits behind Cloudflare) pulls assets and API calls from
- *  sibling names, and a tenant's own domain usually answers on both the apex and www. The
- *  wildcard is anchored at the registrable domain rather than the host, so "api.example.com"
- *  contributes "*.example.com" — a useful rule — instead of "*.api.example.com", which would
- *  match nothing anyone visits. An IP is returned as-is; it has no subdomains. */
-function hostWithSubdomains(host: string): string[] {
-  if (!host) return [];
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return [host];
-  return [host, `*.${registrableDomain(host)}`];
 }
 
 /** Blocks a customer re-sharing their paid session over their own phone hotspot or travel router.
@@ -186,12 +207,21 @@ ${buildAppFilterSection({ portalHosts: opts.portalHosts })}
  *  Without this the router authenticates PPPoE against RADIUS correctly and still cannot accept
  *  a single subscriber, because nothing is listening for PPPoE discovery — exactly the failure
  *  the hotspot had before `/ip hotspot add` was restored. */
+/** The PPPoE ports an ISP chose: one interface ("ether5", "vlan20") or several ("ether4,ether5"). */
+export function pppoePortList(value?: string | null): string[] {
+  return [...new Set((value ?? "").split(",").map((p) => p.trim()).filter(Boolean))];
+}
+
+/** Bridge that joins several PPPoE ports, so the one PPPoE server listens on all of them. */
+export const PPPOE_BRIDGE = "bridge-pppoe";
+
 function buildPppoeSection(
   iface?: string | null,
   gatewayIp?: string | null,
   poolRange?: string | null
 ): string {
-  if (!iface) {
+  const ports = pppoePortList(iface);
+  if (ports.length === 0) {
     return `# 8. PPPoE — not configured for this router. Hotspot works without it; if you sell
 #    PPPoE/fibre subscriptions, set the PPPoE interface and address range on the router in the
 #    dashboard and re-run this script. RADIUS is already wired for PPP, so only the server
@@ -200,19 +230,29 @@ function buildPppoeSection(
 
   const gateway = gatewayIp || "10.10.0.1";
   const range = poolRange || "10.10.0.2-10.10.255.254";
+  // Several ports: joined in their own bridge (never the hotspot's), and the server listens there.
+  const listenOn = ports.length === 1 ? ports[0]! : PPPOE_BRIDGE;
+  const bridgeLines =
+    ports.length === 1
+      ? ""
+      : [
+          `/interface bridge add name=${PPPOE_BRIDGE} comment="MASHUPKGRID PPPOE"`,
+          `/interface bridge port remove [find bridge=${PPPOE_BRIDGE}]`,
+          ...ports.map((p) => `/interface bridge port add bridge=${PPPOE_BRIDGE} interface=${p}`),
+        ].join("\n") + "\n";
 
-  return `# 8. PPPoE Server. RADIUS already knows how to authenticate these subscribers (step 4);
-#    this is the part that listens for them. Each line is idempotent and self-contained, so a
-#    re-run updates rather than duplicates.
-/ip pool remove [find name=mkg-pppoe-pool]
+  return `# 8. PPPoE Server on ${ports.join(", ")}. RADIUS already knows how to authenticate these
+#    subscribers (step 4); this is the part that listens for them. Each line is idempotent and
+#    self-contained, so a re-run updates rather than duplicates.
+${bridgeLines}/ip pool remove [find name=mkg-pppoe-pool]
 /ip pool add name=mkg-pppoe-pool ranges=${range}
 /ppp profile remove [find name=mkg-pppoe]
 /ppp profile add name=mkg-pppoe local-address=${gateway} remote-address=mkg-pppoe-pool
 # The subscriber's speed comes from RADIUS per account (Mikrotik-Rate-Limit), not from this
 # profile — the profile only supplies the addressing, so one profile serves every package.
 /interface pppoe-server server remove [find service-name=mkg-pppoe]
-/interface pppoe-server server add service-name=mkg-pppoe interface=${iface} default-profile=mkg-pppoe one-session-per-host=yes disabled=no
-:put "PPPoE server listening on ${iface}, subscribers get ${range}"`;
+/interface pppoe-server server add service-name=mkg-pppoe interface=${listenOn} default-profile=mkg-pppoe one-session-per-host=yes disabled=no
+:put "PPPoE server listening on ${ports.join(", ")}, subscribers get ${range}"`;
 }
 
 /** Builds the one paste-and-run script a "Link a router" wizard needs before it knows anything
@@ -237,6 +277,10 @@ export function buildMikrotikProvisioningScript(
     serverPort?: number;
     vpnIp?: string;
     loginTemplateUrl?: string;
+    /** Install the per-app package filter (see app-filter.ts). Only ISPs that sell per-app
+     *  packages need it; it sends every customer's DNS through the router, so small routers are
+     *  spared it otherwise. Omitted: installed, as before. */
+    appFilter?: boolean;
     hotspotInterface?: string;
     /** Existing IP pool the hotspot hands addresses from — deliberately reusing the interface's
      *  current DHCP pool rather than creating a second one on the same subnet. */
@@ -255,6 +299,8 @@ export function buildMikrotikProvisioningScript(
      *  by packages/network normalizeWalledGardenHost. Added verbatim: an IP goes to the IP menu,
      *  a name to both, exactly like the built-in entries. */
     extraWalledGardenHosts?: string[];
+    /** Card gateways this ISP takes payments with; their checkout hosts join the walled garden. */
+    cardGateways?: readonly CardGateway[];
     /** PPPoE server settings. Omitted entirely when `pppoeInterface` is absent — see the step 8
      *  comment in the generated script for why this is opt-in rather than defaulted. */
     pppoeInterface?: string | null;
@@ -298,14 +344,16 @@ export function buildMikrotikProvisioningScript(
   const wireguardSection = serverPublicKey && osMajor !== 6
     ? `
 # Optional management VPN (RouterOS v7+). This is deliberately last: a legacy or low-resource
-# hAP must still finish hotspot provisioning even when WireGuard is unavailable.
+# hAP must still finish hotspot provisioning even when WireGuard is unavailable. Sending the key
+# is allowed to fail (a slow or refused request once left routers with no peer at all): the
+# router's check-in reports the key again and puts back a missing peer (vpnRepair).
 ${deferred(`/interface wireguard remove [find name=mkg-wg]
 /interface wireguard add name=mkg-wg listen-port=${serverPort}
 :delay 2s
 /ip address remove [find interface=mkg-wg]
 /ip address add address=${vpnIp}/32 interface=mkg-wg
 :local routerPublicKey [/interface wireguard get [find name=mkg-wg] public-key]
-/tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no
+:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$routerPublicKey keep-result=no} on-error={}
 :delay 2s
 /interface wireguard peers remove [find interface=mkg-wg]
 /interface wireguard peers add interface=mkg-wg public-key="${serverPublicKey}" endpoint-address="${serverHost}" endpoint-port=${serverPort} allowed-address=${vpnSubnet} persistent-keepalive=25s`)}
@@ -327,38 +375,40 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
   const apiHost = hostFromUrl(loginTemplateUrl);
   const portalHost = options.portalHost ? hostFromUrl(options.portalHost) : "captive.mashuphost.tech";
   // App-only customers must still reach the portal (to buy full internet) and the API behind it.
-  const appFilterSection = buildAppFilterSection({ portalHosts: [...new Set([portalHost, apiHost])] });
+  const appFilterSection =
+    options.appFilter === false
+      ? "# Not installed: this ISP sells no per-app packages."
+      : buildAppFilterSection({ portalHosts: [...new Set([portalHost, apiHost])] });
   // Order matters only for readability of the generated script; walledGardenLines de-dupes.
   // The tenant's own domains come before the gateways so an operator reading the script sees
   // "my portal is reachable" first — that is the entry they most often need to check.
-  const walledGardenHosts = [
+  const walledGardenHosts = hotspotWalledGardenHosts({
     serverHost,
-    "captive.mashuphost.tech",
-    ...hostWithSubdomains(apiHost),
-    ...hostWithSubdomains(portalHost),
-    ...hostWithSubdomains("mashuphost.tech"),
-    ...(options.portalDomains ?? []).flatMap((d) => hostWithSubdomains(hostFromUrl(d))),
-    ...PAYMENT_GATEWAY_WALLED_GARDEN_HOSTS,
-    ...(options.extraWalledGardenHosts ?? []),
-  ];
+    apiHost,
+    portalHost,
+    portalDomains: options.portalDomains,
+    cardGateways: options.cardGateways,
+    extraHosts: options.extraWalledGardenHosts,
+  });
 
   const rawHotspotPorts = (options.hotspotPorts && options.hotspotPorts.length > 0)
     ? options.hotspotPorts
     : ["ether2", "ether3", "ether4", "wlan1"];
   const lanPort = options.lanPort?.trim() || null;
-  const pppoeIface = options.pppoeInterface?.trim() || null;
+  const pppoePorts = pppoePortList(options.pppoeInterface);
 
   // Filter out any port explicitly assigned to direct LAN, PPPoE, or WAN (ether1)
   let activeHotspotPorts = rawHotspotPorts.filter(
-    (p) => p !== lanPort && p !== pppoeIface && p !== "ether1"
+    (p) => p !== lanPort && !pppoePorts.includes(p) && p !== "ether1"
   );
-  if (activeHotspotPorts.length === 0) {
+  // Nothing left: the old default, unless PPPoE took every port (the hotspot keeps the Wi-Fi).
+  if (activeHotspotPorts.length === 0 && pppoePorts.length === 0) {
     activeHotspotPorts = ["ether2", "ether3"];
   }
 
   // Always bridge wireless radios (wlan1, wifi1) if present and not assigned to LAN / PPPoE
   const wirelessInterfaces = ["wlan1", "wifi1"].filter(
-    (w) => w !== lanPort && w !== pppoeIface && !activeHotspotPorts.includes(w)
+    (w) => w !== lanPort && !pppoePorts.includes(w) && !activeHotspotPorts.includes(w)
   );
 
   const allBridgePorts = [...activeHotspotPorts, ...wirelessInterfaces];
@@ -367,7 +417,7 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
     .map((port) => `:do {/interface bridge port add bridge=bridge interface=${port}} on-error={}`)
     .join("\n");
 
-  const cleanupExcludedPorts = [lanPort, pppoeIface]
+  const cleanupExcludedPorts = [lanPort, ...pppoePorts]
     .filter(Boolean)
     .map((port) => `:do {/interface bridge port remove [find interface=${port}]} on-error={}`)
     .join("\n");
@@ -417,6 +467,9 @@ ${cleanupExcludedPorts ? `${cleanupExcludedPorts}\n` : ""}${bridgePortLines}
 :do {/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1} on-error={}
 :do {/ip dns set allow-remote-requests=yes} on-error={}
 :do {/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="MASHUPKGRID"} on-error={}
+${PRIVATE_LIST_LINES.map((l) => `:do {${l}} on-error={}`).join("\n")}
+:do {/ip firewall nat remove [find comment="${LAN_NAT_COMMENT}"]} on-error={}
+:do {${LAN_NAT_RULE}} on-error={}
 ${directLanSection ? `${directLanSection}\n` : ""}
 
 # Management API and account.
@@ -434,22 +487,23 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 # (findMacLogin) when it reconnects, without seeing the sign-in page at all.
 :do {/ip hotspot profile set [find] use-radius=yes login-by=mac,http-chap,http-pap,cookie mac-auth-mode=mac-as-username trial=no radius-accounting=yes radius-interim-update=1m html-directory=hotspot} on-error={}
 :do {/ip hotspot set [find interface=bridge] profile=default disabled=no} on-error={}
-:do {/ip hotspot reset-html} on-error={}
+${deferred(`:if ([:len [/file find name="hotspot/login.html"]] = 0) do={/ip hotspot reset-html}`)}
 :do {/ip hotspot user profile set [find default=yes] shared-users=1} on-error={}
 :do {/ip hotspot remove [find name=mkg-hotspot]} on-error={}
 :do {/ip hotspot add name=mkg-hotspot interface=bridge address-pool=default-dhcp profile=default disabled=no} on-error={}
 :do {/ip hotspot walled-garden remove [find comment="MASHUPKGRID"]} on-error={}
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
+:do {/ip firewall filter remove [find comment="${UNPAID_DNS_COMMENT}"]} on-error={}
+${UNPAID_DNS_RULES.map((rule) => `:do {${rule}} on-error={}`).join("\n")}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}
 :do {/tool fetch url="${loginTemplateUrl}" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=hotspot/alogin.html check-certificate=no} on-error={}
 :do {/tool fetch url="${aloginTemplateUrl}" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}
 
-# Self-repair for the branded login page: if hotspot/login.html is ever missing (a setup cut short,
-# a reset of the hotspot folder), customers get MikroTik's stock sign-in page instead of the portal.
+# The sign-in page is checked on every report (see portalRepair in buildHeartbeatScript); the
+# separate scheduler earlier versions added is removed, to keep small routers light.
 :do {/system scheduler remove [find name=mkg-portal-page]} on-error={}
-:do {/system scheduler add name=mkg-portal-page interval=5m on-event=":if ([:len [/file find name=\\"hotspot/login.html\\"]] = 0 && [:len [/file find name=\\"flash/hotspot/login.html\\"]] = 0) do={:do {/ip hotspot reset-html} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${loginTemplateUrl}\\" dst-path=flash/hotspot/login.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=hotspot/alogin.html check-certificate=no} on-error={}; :do {/tool fetch url=\\"${aloginTemplateUrl}\\" dst-path=flash/hotspot/alogin.html check-certificate=no} on-error={}}"} on-error={}
 
 # Persistent check-in, once a minute. It fetches the platform's small report script into memory
 # (never onto flash) and runs it: CPU, memory, disk, temperature, uptime, users — see
@@ -495,9 +549,107 @@ export function heartbeatScriptUrl(callbackUrl: string): string {
 /** The mkg-heartbeat scheduler's script, escaped to sit inside on-event="…" of the setup script. */
 function heartbeatOnEvent(callbackUrl: string): string {
   const plain = `/tool fetch url=\\"${callbackUrl}\\" http-method=post keep-result=no`;
+  // Skipped while the previous run's download is still going (see HEARTBEAT_LOCK_OPEN).
   return (
+    `:global mkgHbFetch; :local up [/system resource get uptime]; :local run true; ` +
+    `:if ([:typeof \\$mkgHbFetch] = \\"time\\") do={:if (\\$up > \\$mkgHbFetch) do={:if ((\\$up - \\$mkgHbFetch) < 00:05:00) do={:set run false}}}; ` +
+    `:if (\\$run) do={:set mkgHbFetch \\$up; ` +
     `:do {:local r [/tool fetch url=\\"${heartbeatScriptUrl(callbackUrl)}\\" output=user as-value]; ` +
-    `:local f [:parse (\\$r->\\"data\\")]; \\$f} on-error={:do {${plain}} on-error={}}`
+    `:set mkgHbFetch \\"\\"; :local f [:parse (\\$r->\\"data\\")]; \\$f} on-error={:set mkgHbFetch \\"\\"; :do {${plain}} on-error={}}}`
+  );
+}
+
+/**
+ * The report runs only when no other report is still running on the router, or the last one
+ * started over 5 minutes ago (stuck: its connection will time out on its own). RouterOS starts a
+ * scheduled script every interval whether or not the last one finished, and each stuck fetch
+ * holds memory: a few in a row froze a hAP lite (console not responding, no check-ins).
+ */
+const HEARTBEAT_LOCK_OPEN =
+  `:global mkgHbBusy; :local mkgUp [/system resource get uptime]; :local mkgRun true; ` +
+  // Nested, not one condition with &&: comparing the uptime with a cleared ("") lock would error.
+  `:if ([:typeof $mkgHbBusy] = "time") do={:if ($mkgUp > $mkgHbBusy) do={:if (($mkgUp - $mkgHbBusy) < 00:05:00) do={:set mkgRun false}}}; ` +
+  `:if ($mkgRun) do={:set mkgHbBusy $mkgUp`;
+const HEARTBEAT_LOCK_CLOSE = `:set mkgHbBusy ""}`;
+
+/** Sets the mkg-heartbeat scheduler to this interval when it runs at another one. */
+export function checkInInterval(every: "1m" | "5m"): string {
+  return `:do {/system scheduler set [find where name="mkg-heartbeat" and interval!=${every}] interval=${every}} on-error={}`;
+}
+
+/** Shares the internet with every customer, whichever port the internet arrives on: hotspot
+ *  (192.168.88.0/24), PPPoE (its pool) and every VLAN's subnet alike. The ether1 masquerade
+ *  assumes the internet is on ether1; on a router fed through ether2, an LTE modem or a PPPoE
+ *  uplink, the router itself was online but customers got "You're online" and nothing loaded.
+ *
+ *  One rule: traffic from any private address to any public one is masqueraded. Traffic between
+ *  the router's own networks (and over the management VPN) stays private and is never touched,
+ *  and a new VLAN or PPPoE range needs nothing of its own. */
+export const LAN_NAT_COMMENT = "MASHUPKGRID LAN NAT";
+const PRIVATE_LIST = "mkg-private";
+const PRIVATE_RANGES = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
+const LAN_NAT_RULE = `/ip firewall nat add chain=srcnat src-address-list=${PRIVATE_LIST} dst-address-list=!${PRIVATE_LIST} action=masquerade comment="${LAN_NAT_COMMENT}"`;
+const PRIVATE_LIST_LINES = [
+  `/ip firewall address-list remove [find list=${PRIVATE_LIST}]`,
+  ...PRIVATE_RANGES.map((r) => `/ip firewall address-list add list=${PRIVATE_LIST} address=${r} comment="${LAN_NAT_COMMENT}"`),
+];
+/** Replaces the first version of the rule (hotspot subnet only) and fills the address list. */
+const LAN_NAT_REPAIR =
+  `:do {:if ([:len [/ip firewall address-list find list=${PRIVATE_LIST}]] != ${PRIVATE_RANGES.length}) do={${PRIVATE_LIST_LINES.join("; ")}}; ` +
+  `:if ([:len [/ip firewall nat find comment="${LAN_NAT_COMMENT}" src-address-list=${PRIVATE_LIST}]] != 1) do={/ip firewall nat remove [find comment="${LAN_NAT_COMMENT}"]; ${LAN_NAT_RULE}}} on-error={}`;
+
+const UNPAID_REPAIR =
+  `:do {:foreach w in=[/ip hotspot walled-garden ip find comment="MASHUPKGRID"] do={:if ([:len [/ip hotspot walled-garden ip get $w dst-port]] = 0) do={/ip hotspot walled-garden ip set $w ${WEB_ONLY}}}} on-error={}\n` +
+  `:do {:if ([:len [/ip firewall filter find comment="${UNPAID_DNS_COMMENT}"]] != ${UNPAID_DNS_RULES.length}) do={/ip firewall filter remove [find comment="${UNPAID_DNS_COMMENT}"]; ${UNPAID_DNS_RULES.join("; ")}}} on-error={}`;
+
+/**
+ * Makes a router's walled garden exactly this list, for the entries the platform manages (comment
+ * "MASHUPKGRID"; anything an operator added by hand is left alone): entries no longer on it — the
+ * old "*.mashuphost.tech" and "*.safaricom.co.ke" wildcards, mashuphost.tech itself, card hosts
+ * of a gateway the ISP turned off — are removed, and missing ones added, names to both menus
+ * (the IP menu web pages only, and never a wildcard, which it can't resolve). IP addresses are
+ * not handled here: the IP menu keeps them as dst-address, which this leaves alone.
+ */
+export function walledGardenSync(hosts: readonly string[]): string {
+  const names = hosts.filter((h) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(h) && /^[\w.*-]+$/.test(h));
+  if (names.length === 0) return "";
+  const list = `{${names.map((h) => `"${h}"`).join(";")}}`;
+  const prune = (menu: string) =>
+    `:foreach e in=[${menu} find comment="MASHUPKGRID"] do={:local h [${menu} get $e dst-host]; :if ([:len $h] > 0 && [:typeof [:find $ok $h]] = "nil") do={${menu} remove $e}}; `;
+  return (
+    `:do {:local ok ${list}; ` +
+    prune("/ip hotspot walled-garden") +
+    prune("/ip hotspot walled-garden ip") +
+    `:foreach h in=$ok do={` +
+    `:if ([:len [/ip hotspot walled-garden find dst-host=$h]] = 0) do={/ip hotspot walled-garden add dst-host=$h action=allow comment="MASHUPKGRID"}; ` +
+    `:if ([:typeof [:find $h "*"]] = "nil" && [:len [/ip hotspot walled-garden ip find dst-host=$h]] = 0) do={/ip hotspot walled-garden ip add dst-host=$h ${WEB_ONLY} action=accept comment="MASHUPKGRID"}}` +
+    `} on-error={}`
+  );
+}
+
+/** The platform's end of the management VPN, as a router needs it. */
+export interface VpnPeerSettings {
+  serverPublicKey: string;
+  endpointHost: string;
+  endpointPort: number;
+  subnet: string;
+  vpnIp: string;
+}
+
+/**
+ * Puts the router's management VPN back when any part of it is missing: the mkg-wg interface,
+ * its address, or the peer for this server (a router set up once with its peer step cut short
+ * reported "no peer" forever, and remote WinBox could never reach it). Each part is touched only
+ * when missing or wrong. RouterOS 7 only; through :parse, since v6 has no WireGuard menu.
+ */
+export function vpnRepair(vpn: VpnPeerSettings): string {
+  const peer = `public-key="${vpn.serverPublicKey}"`;
+  return deferred(
+    [
+      `:if ([:len [/interface wireguard find name=mkg-wg]] = 0) do={/interface wireguard add name=mkg-wg listen-port=${vpn.endpointPort}}`,
+      `:if ([:len [/ip address find interface=mkg-wg address="${vpn.vpnIp}/32"]] = 0) do={/ip address remove [find interface=mkg-wg]; /ip address add address=${vpn.vpnIp}/32 interface=mkg-wg}`,
+      `:if ([:len [/interface wireguard peers find interface=mkg-wg ${peer}]] = 0) do={/interface wireguard peers remove [find interface=mkg-wg]; /interface wireguard peers add interface=mkg-wg ${peer} endpoint-address=${vpn.endpointHost} endpoint-port=${vpn.endpointPort} allowed-address=${vpn.subnet} persistent-keepalive=25s}`,
+    ].join("\n")
   );
 }
 
@@ -509,11 +661,33 @@ function heartbeatOnEvent(callbackUrl: string): string {
  * as may the hotspot user count on a router with no hotspot. Kept well under the 4 KB a v6
  * `fetch output=user` returns.
  */
-export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: string, options: { hotspotCheck?: boolean } = {}): string {
+export function buildHeartbeatScript(
+  callbackUrl: string,
+  loginTemplateUrl?: string,
+  /** walledGarden: this ISP's hotspotWalledGardenHosts, kept in sync on RouterOS 7 routers.
+   *  checkInEvery: how often this router should report ("5m" on a small router, see
+   *  heartbeat-interval.ts in @mashupkgrid/network); the router's scheduler is set to it. */
+  options: {
+    hotspotCheck?: boolean;
+    walledGarden?: readonly string[];
+    checkInEvery?: "1m" | "5m" | null;
+    vpn?: VpnPeerSettings | null;
+    /** Exact byte sizes of this ISP's sign-in and "you're online" pages, as the API serves them. */
+    pageSizes?: { login?: number | null; alogin?: number | null };
+  } = {}
+): string {
   const get = (field: string) => `[/system resource get ${field}]`;
   const aloginTemplateUrl = loginTemplateUrl ? aloginUrlFor(loginTemplateUrl) : null;
   return [
     `{`,
+    // One report at a time: a report stuck on a slow or broken connection must not be joined by a
+    // new one every minute until a small router (hAP lite, 32 MB) runs out of memory.
+    HEARTBEAT_LOCK_OPEN,
+    // A small router reports every 5 minutes: two TLS downloads a minute kept a hAP lite's one
+    // 650 MHz core at 100%. Changed only when it differs, so nothing is written each time.
+    ...(options.checkInEvery ? [checkInInterval(options.checkInEvery)] : []),
+    // RouterOS 7: the management VPN, put back when a part is missing (see vpnRepair).
+    ...(options.vpn && options.hotspotCheck !== false ? [vpnRepair(options.vpn)] : []),
     // Self-repair, each change made only when something is actually wrong, so a healthy router
     // writes nothing every minute. Radio commands go through deferred(): a router without that
     // menu (no wifi package, v6) must not fail this whole script, which is parsed as one.
@@ -527,9 +701,17 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // the sign-in page). Exactly one pair of rules: any other count — none, or the duplicates an
     // earlier version added every minute — is cleared and replaced.
     `:do {:if ([:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] != 2) do={/ip firewall nat remove [find comment="MASHUPKGRID DNS"]; /ip firewall nat add chain=dstnat in-interface=bridge protocol=udp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"; /ip firewall nat add chain=dstnat in-interface=bridge protocol=tcp dst-port=53 action=redirect to-ports=53 comment="MASHUPKGRID DNS"}} on-error={}`,
+    // RouterOS 6 gets it from its setup script: its report must stay under 4 KB.
+    ...(options.hotspotCheck === false ? [] : [LAN_NAT_REPAIR]),
     `:do {/ip hotspot enable [find interface=bridge disabled=yes]} on-error={}`,
     // The sign-in page, in the folder each hotspot really uses (see portalRepair).
-    portalRepair(loginTemplateUrl, aloginTemplateUrl),
+    // Unpaid devices: walled-garden addresses for web pages only, and no DNS tunnels (see WEB_ONLY
+    // and UNPAID_DNS_RULES). Routers set up before these existed get them here; RouterOS 6 gets
+    // them from its setup script, since its report must stay under 4 KB.
+    ...(options.hotspotCheck === false ? [] : [UNPAID_REPAIR, walledGardenSync(options.walledGarden ?? [])].filter(Boolean)),
+    // RouterOS 6 leaves out the "you're online" refresh, like the hotspot check: its report must
+    // stay under 4 KB.
+    portalRepair(loginTemplateUrl, aloginTemplateUrl, options.hotspotCheck !== false, options.pageSizes),
     // cpu-load is the last second's load, and this runs straight after the router fetched it over
     // TLS — on a hAP lite that alone reads ~100%. Let the spike pass before sampling.
     `:delay 3s`,
@@ -540,7 +722,10 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
     // handshake — "1," means it exists but has never connected. v6 has no WireGuard: skipped.
     `:do {:local w [:parse ":return ([:len [/interface wireguard find name=mkg-wg]] . \\",\\" . [/interface wireguard peers get [find interface=mkg-wg] last-handshake])"]; :set d ($d . "&wg=" . [$w])} on-error={:do {:local w [:parse ":return [:len [/interface wireguard find name=mkg-wg]]"]; :set d ($d . "&wg=" . [$w])} on-error={}}`,
     ...(options.hotspotCheck === false ? [] : [HOTSPOT_CHECK]),
-    `/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no`,
+    // The router's WireGuard key, so the platform registers it again if it changed or was lost.
+    ...(options.hotspotCheck === false ? [] : [`:do {:local k [:parse ":return [/interface wireguard get [find name=mkg-wg] public-key]"]; :set d ($d . "&wgkey=" . [$k])} on-error={}`]),
+    `:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no} on-error={}`,
+    HEARTBEAT_LOCK_CLOSE,
     `}`,
     "",
   ].join("\n");
@@ -558,30 +743,45 @@ export function buildHeartbeatScript(callbackUrl: string, loginTemplateUrl?: str
  */
 const HOTSPOT_CHECK = `:do {:local c ("srv=" . [:len [/ip hotspot find disabled=no]] . ";hosts=" . [:len [/ip hotspot host find]] . ";auth=" . [:len [/ip hotspot active find]] . ";leases=" . [:len [/ip dhcp-server lease find]] . ";dnsnat=" . [:len [/ip firewall nat find comment="MASHUPKGRID DNS"]] . ";login=" . [:len [/file find name~"hotspot/login.html"]] . ";radios=" . [:len [/interface bridge port find interface~"wlan|wifi"]] . ";garden=" . [:len [/ip hotspot walled-garden find dst-host~"mashuphost"]] . ";ping=" . [/ping 8.8.8.8 count=2]); :do {:resolve google.com; :set c ($c . ";dns=1")} on-error={:set c ($c . ";dns=0")}; :do {:local dir [/ip hotspot profile get [/ip hotspot get [find disabled=no] profile] html-directory]; :set c ($c . ";dir=" . $dir . ";lsize=" . [/file get [find name=($dir . "/login.html")] size])} on-error={}; :do {:local m [:parse ":return [/radius monitor 0 once as-value]"]; :local r [$m]; :set c ($c . ";rreq=" . ($r->"requests") . ";racc=" . ($r->"accepts") . ";rrej=" . ($r->"rejects") . ";rto=" . ($r->"timeouts"))} on-error={}; :set d ($d . "&hs=" . $c)} on-error={}`;
 
+/** In the current "you're online" page (hotspot/alogin.html). A router whose copy lacks it has an
+ *  older page and downloads the new one on its next report; bump it when that page changes. */
+export const ALOGIN_PAGE_MARKER = "mkg-alogin-2";
+
 /**
  * Makes sure every hotspot can show the sign-in page. For each hotspot profile it reads the
  * folder that profile really serves pages from (html-directory — "hotspot" or "flash/hotspot"
- * depending on the board), and if that folder's login.html is missing, cut short (under 200
- * bytes) or not the platform's (no "mkg-portal" marker — MikroTik's stock page, which can't take
- * payments) it rebuilds the hotspot's default pages there (reset-html, for that exact hotspot) and
- * downloads the ISP's sign-in and "you're online" pages into the same folder. A router with the
- * page missing answers every phone with "Error 404 : Not Found", which Android shows as
- * "Connected, no internet". Nothing is written when the page is fine. reset-html goes through
- * :parse, so a version that words it differently fails that command alone, not the report.
+ * depending on the board) and compares that folder's login.html with the page the platform
+ * serves by size alone: the platform knows the exact byte count of this ISP's page (loginSize),
+ * so a missing, cut-short or stock MikroTik page is spotted without reading the file (reading
+ * contents is unreliable on RouterOS 7 and slow on a hAP lite). When it differs, the ISP's page is
+ * downloaded over it; the stock pages are never restored first, so a download that fails leaves
+ * whatever page was there — earlier versions reset the folder first, and a failed download then
+ * left MikroTik's stock sign-in page until the next try. reset-html runs only when the folder
+ * itself is missing (the hotspot needs its other files). The "you're online" page (alogin.html) is
+ * checked the same way. Nothing is written when the pages are right. Without sizes (an older
+ * caller) a page of 200 bytes or more counts as fine.
  */
-function portalRepair(loginUrl: string | undefined, aloginUrl: string | null): string {
-  const fetches = loginUrl
-    ? `:do {/tool fetch url="${loginUrl}" dst-path=($dir . "/login.html") check-certificate=no} on-error={}; ` +
-      (aloginUrl ? `:do {/tool fetch url="${aloginUrl}" dst-path=($dir . "/alogin.html") check-certificate=no} on-error={}; ` : "")
-    : "";
+function portalRepair(
+  loginUrl: string | undefined,
+  aloginUrl: string | null,
+  refreshAlogin = true,
+  sizes: { login?: number | null; alogin?: number | null } = {}
+): string {
+  const sizeOk = (v: string, expected: number | null | undefined) =>
+    expected ? `[:tonum [/file get ($${v}->0) size]] = ${expected}` : `[:tonum [/file get ($${v}->0) size]] >= 200`;
+  const fetchTo = (url: string, file: string) =>
+    `:do {/tool fetch url="${url}" dst-path=($dir . "/${file}") check-certificate=no} on-error={}; `;
   return (
     `:do {:foreach p in=[/ip hotspot profile find] do={:local dir [/ip hotspot profile get $p html-directory]; ` +
     `:if ([:len $dir] = 0) do={:set dir "hotspot"; /ip hotspot profile set $p html-directory=hotspot}; ` +
+    `:if ([:len [/file find name=$dir]] = 0) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}}; ` +
     `:local ok false; :local f [/file find name=($dir . "/login.html")]; ` +
-    (loginUrl
-      ? `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:if ([:typeof [:find [/file get ($f->0) contents] "mkg-portal"]] = "num") do={:set ok true}}}; `
-      : `:if ([:len $f] > 0) do={:if ([/file get ($f->0) size] >= 200) do={:set ok true}}; `) +
-    `:if ($ok = false) do={:foreach h in=[/ip hotspot find profile=[/ip hotspot profile get $p name]] do={:do {:local r [:parse ("/ip hotspot reset-html " . $h)]; $r} on-error={}}; ${fetches}}; ` +
+    `:if ([:len $f] > 0) do={:if (${sizeOk("f", sizes.login)}) do={:set ok true}}; ` +
+    (loginUrl ? `:if ($ok = false) do={${fetchTo(loginUrl, "login.html")}${aloginUrl ? fetchTo(aloginUrl, "alogin.html") : ""}}; ` : "") +
+    (aloginUrl && refreshAlogin
+      ? `:local a [/file find name=($dir . "/alogin.html")]; :local aok false; :if ([:len $a] > 0) do={:if (${sizeOk("a", sizes.alogin)}) do={:set aok true}}; ` +
+        `:if ($aok = false) do={${fetchTo(aloginUrl, "alogin.html")}}; `
+      : "") +
     `:if ([/ip hotspot profile get $p use-radius] = false) do={/ip hotspot profile set $p use-radius=yes login-by=mac,http-chap,http-pap,cookie}}} on-error={}`
   );
 }

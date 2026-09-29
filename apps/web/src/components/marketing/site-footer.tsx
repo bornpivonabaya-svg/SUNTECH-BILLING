@@ -42,7 +42,6 @@ function columns(supportEmail?: string): { title: string; links: FooterLink[] }[
       links: [
         { label: "Terms of Service", href: "/terms" },
         { label: "Refund Policy", href: "/refund-policy" },
-        { label: "Referral Policy", href: "/referral-policy" },
         { label: "Age Policy", href: "/age-policy" },
       ],
     },

@@ -42,10 +42,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (isLocalHost(hostname)) return NextResponse.next();
 
   // If request arrives on captive portal domain, route directly to hotspot sign-in
-  if (hostname === "captive.mashuphost.tech" || hostname.startsWith("captive.")) {
+  if (hostname.startsWith("captive.")) {
     const url = request.nextUrl.clone();
-    if (url.pathname === "/" || url.pathname === "/login") {
-      const tenant = url.searchParams.get("tenant") || "demo-isp";
+    // Only with an ISP named in the link: never show some other ISP's sign-in page.
+    const tenant = url.searchParams.get("tenant");
+    if (tenant && (url.pathname === "/" || url.pathname === "/login")) {
       url.pathname = `/hotspot/${tenant}`;
       return NextResponse.rewrite(url);
     }
