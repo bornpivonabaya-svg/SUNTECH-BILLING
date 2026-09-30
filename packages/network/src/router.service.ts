@@ -670,9 +670,17 @@ function hostOf(url: string): string {
   }
 }
 
+/** The API as phones and browsers reach it (APP_API_PUBLIC_URL). It differs from the address
+ *  routers use when ROUTER_API_BASE_URL sends routers straight to the server (past a proxy such as
+ *  Cloudflare that some RouterOS versions can't connect through), and the sign-in page calls it, so
+ *  it must be in the walled garden too. */
+export function publicApiHost(): string {
+  return hostOf(env.APP_API_PUBLIC_URL || "");
+}
+
 /** The portal and the API behind it: reachable even for app-only customers, so they can buy more. */
 export function appFilterPortalHosts(): string[] {
-  return [...new Set([hostOf(env.APP_PORTAL_URL || "https://captive.suntechke.com"), hostOf(routerFacingApiBase())].filter(Boolean))];
+  return [...new Set([hostOf(env.APP_PORTAL_URL || "https://captive.suntechke.com"), hostOf(routerFacingApiBase()), publicApiHost()].filter(Boolean))];
 }
 
 const RECONCILE_INTERVAL_MS = 10 * 60_000;
@@ -718,6 +726,7 @@ export async function reconcileRouterProvisioning(routerId: string, options: { f
       walledGardenHosts: [
         hostOf(env.APP_PORTAL_URL || "https://captive.suntechke.com"),
         hostOf(routerFacingApiBase()),
+        publicApiHost(),
         // What a super admin and this ISP allowed from the dashboard — this pass is how a router
         // that is already online picks up a host added after it was linked.
         ...(await listWalledGardenHostsFor(router.tenantId)),

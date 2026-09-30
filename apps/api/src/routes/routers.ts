@@ -36,6 +36,7 @@ import {
   routerFacingApiBase,
   appFilterPortalHosts,
   routerRadiusHost,
+  publicApiHost,
   platformPublicAddress,
   listWalledGardenHostsFor,
   reconcileRouterProvisioning,
@@ -179,7 +180,8 @@ async function tenantWalledGarden(tenantId: string): Promise<string[]> {
     portalHost: portalHostname(),
     portalDomains,
     cardGateways,
-    extraHosts,
+    // The API as phones reach it, when routers use another address (ROUTER_API_BASE_URL).
+    extraHosts: [...extraHosts, publicApiHost()].filter(Boolean),
   });
 }
 
@@ -481,7 +483,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         loginTemplateUrl,
         portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.suntechke.com",
         portalDomains: await getTenantPortalDomains(tenantId),
-        extraWalledGardenHosts: await listWalledGardenHostsFor(tenantId),
+        extraWalledGardenHosts: [...(await listWalledGardenHostsFor(tenantId)), publicApiHost()].filter(Boolean),
         cardGateways: await tenantCardGateways(tenantId),
         pppoeInterface: router.pppoeInterface,
         pppoeGatewayIp: router.pppoeGatewayIp,
@@ -1072,7 +1074,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
       loginTemplateUrl,
       portalHost: env.APP_PORTAL_URL ? new URL(env.APP_PORTAL_URL).hostname : "captive.suntechke.com",
       portalDomains: await getTenantPortalDomains(router.tenantId),
-      extraWalledGardenHosts: await listWalledGardenHostsFor(router.tenantId),
+      extraWalledGardenHosts: [...(await listWalledGardenHostsFor(router.tenantId)), publicApiHost()].filter(Boolean),
       cardGateways: await tenantCardGateways(router.tenantId),
       pppoeInterface: router.pppoeInterface,
       pppoeGatewayIp: router.pppoeGatewayIp,
