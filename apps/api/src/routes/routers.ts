@@ -326,7 +326,13 @@ const ENSURE_INTERNET =
   `:put "No internet yet: asking the modem on ether1 for an address..."; ` +
   `:if ([:len [/ip dhcp-client find interface=ether1]] = 0) do={/ip dhcp-client add interface=ether1 disabled=no} else={/ip dhcp-client enable [find interface=ether1]}; ` +
   `:if ([:len [/ip dns get servers]] = 0) do={/ip dns set servers=8.8.8.8,1.1.1.1}; ` +
-  `:for i from=1 to=20 do={:if ([:len [/ip route find dst-address=0.0.0.0/0 active=yes]] = 0) do={:delay 1s}}}; `;
+  `:for i from=1 to=20 do={:if ([:len [/ip route find dst-address=0.0.0.0/0 active=yes]] = 0) do={:delay 1s}}}; ` +
+  // A reset router's clock is back in the past, and the HTTPS download then fails with "SSL:
+  // internal error". The clock is set from the internet first (the servers parameter is
+  // "servers" on v7, "server-dns-names" on v6: each is parsed only when run, so the wrong one
+  // fails alone), and given a few seconds to sync when it is still years behind.
+  `:do {:local f [:parse "/system ntp client set enabled=yes servers=time.cloudflare.com,pool.ntp.org"]; $f} on-error={:do {:local f [:parse "/system ntp client set enabled=yes server-dns-names=time.cloudflare.com,pool.ntp.org"]; $f} on-error={}}; ` +
+  `:for i from=1 to=10 do={:if ([:typeof [:find [/system clock get date] "202"]] = "nil") do={:delay 1s}}; `;
 
 /** The one line an ISP pastes into the router's terminal. It checks in as soon as the download
  *  works, so a router that reached us always shows up on the dashboard, whatever happens in the
@@ -334,7 +340,14 @@ const ENSURE_INTERNET =
  *  route — with its output in mkg-setup.txt on the router. */
 function setupFetchCommand(provisionToken: string): string {
   const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
-  return `${ENSURE_INTERNET}/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; :put "Setup is running on the router. It shows Online in Suntech within a minute."`;
+  // Up to three tries, a few seconds apart: the first can fail while the clock is still syncing.
+  return (
+    `${ENSURE_INTERNET}:local mkgOk false; ` +
+    `:for i from=1 to=3 do={:if ($mkgOk = false) do={:do {/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :set mkgOk true} on-error={:delay 4s}}}; ` +
+    `:if ($mkgOk = false) do={:put "Could not download the setup: check the router's internet and clock (/system clock print), then paste this command again."} else={` +
+    `:do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; ` +
+    `:put "Setup is running on the router. It shows Online in Suntech within a minute."}`
+  );
 }
 
 export async function routerRoutes(app: FastifyInstance): Promise<void> {
