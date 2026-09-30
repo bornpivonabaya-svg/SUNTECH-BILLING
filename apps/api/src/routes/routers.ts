@@ -345,17 +345,27 @@ const ENSURE_INTERNET =
  *  route — with its output in mkg-setup.txt on the router. */
 function setupFetchCommand(provisionToken: string): string {
   const path = `/api/v1/routers/provision/${provisionToken}`;
-  // The router's own address first (ROUTER_API_BASE_URL), then the public one: some routers can't
-  // reach one of them (a TLS version, a blocked port, a proxy), and the setup must still arrive.
-  // Whichever answered is used for the rest, and setup.rsc then points the router at it too.
-  const bases = [...new Set([routerApiBase(), publicApiBase()])].map((b) => `"${b}${path}"`).join(";");
+  // The public address first (every router with internet reaches it once its clock is right),
+  // then the router's own address (ROUTER_API_BASE_URL) for a router that can't: whichever
+  // answered is used for the rest, and setup.rsc then points the router at it too.
+  const bases = [...new Set([publicApiBase(), routerApiBase()])].map((b) => `"${b}${path}"`).join(";");
+  // Downloads are silent (as-value), so the terminal shows only plain messages.
   // Two tries per address, a few seconds apart: the first can fail while the clock is still syncing.
+  // Then the setup runs as a background job (so a dropped terminal can't stop it) and this command
+  // waits for it, up to 5 minutes, and says plainly whether it finished — with the last lines of
+  // its log when it didn't, so nothing has to be looked up by hand.
   return (
-    `${ENSURE_INTERNET}:local mkgOk ""; ` +
-    `:foreach b in={${bases}} do={:for i from=1 to=2 do={:if ($mkgOk = "") do={:do {/tool fetch url=($b . "/setup.rsc") dst-path=setup.rsc; :set mkgOk $b} on-error={:delay 3s}}}}; ` +
+    `${ENSURE_INTERNET}:local mkgOk ""; :put "Downloading the Suntech setup..."; ` +
+    `:foreach b in={${bases}} do={:for i from=1 to=2 do={:if ($mkgOk = "") do={:do {:local r [/tool fetch url=($b . "/setup.rsc") dst-path=setup.rsc as-value]; :set mkgOk $b} on-error={:delay 3s}}}}; ` +
     `:if ($mkgOk = "") do={:put "Could not download the setup: check the router's internet and clock (/system clock print), then paste this command again."} else={` +
-    `:do {/tool fetch url=($mkgOk . "/callback") http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; ` +
-    `:put "Setup is running on the router. It shows Online in Suntech within a minute."}`
+    `:do {:local r [/tool fetch url=($mkgOk . "/callback") http-method=post keep-result=no as-value]} on-error={}; :delay 2s; ` +
+    `:put "Setting up internet, hotspot, sign-in page, RADIUS, PPPoE and VPN. This takes 1-4 minutes: leave this window open..."; ` +
+    `:local j [:execute script="/import setup.rsc" file=mkg-setup.txt]; :local c ""; :local done false; ` +
+    `:for i from=1 to=150 do={:if ($done = false) do={:delay 2s; :do {:set c [/file get [find name~"mkg-setup"] contents]} on-error={}; ` +
+    `:if ([:typeof [:find $c "SUCCESS"]] != "nil") do={:set done true}; ` +
+    `:if ($i > 5) do={:if ([:typeof $j] = "id") do={:if ([:len [/system script job find where .id=$j]] = 0) do={:set done true}}}}}; ` +
+    `:if ([:typeof [:find $c "SUCCESS"]] != "nil") do={:put "DONE: the router is set up. Phones on its Wi-Fi now get the Suntech sign-in page, and it shows Online in Suntech within a minute."} ` +
+    `else={:local from 0; :if ([:len $c] > 600) do={:set from ([:len $c] - 600)}; :put "The setup stopped before the end. Its last lines:"; :put [:pick $c $from [:len $c]]; :put "Send these lines to Suntech support, or paste this command again."}}`
   );
 }
 
