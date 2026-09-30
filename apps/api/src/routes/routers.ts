@@ -343,7 +343,21 @@ const ENSURE_INTERNET =
  *  works, so a router that reached us always shows up on the dashboard, whatever happens in the
  *  setup after it. The import runs as a background job (:execute) — see the provisioning-script
  *  route — with its output in mkg-setup.txt on the router. */
+/** The command the ISP pastes: short, so it's easy to copy into any terminal. It only downloads
+ *  the starter script (setupStarterScript, served as go.rsc) from the public address, or the
+ *  server's own address when that fails, and runs it; the starter does the rest. */
 function setupFetchCommand(provisionToken: string): string {
+  const path = `/api/v1/routers/provision/${provisionToken}/go.rsc`;
+  const [first, second] = [...new Set([publicApiBase(), routerApiBase()])];
+  const fetch = (base: string) => `/tool fetch url="${base}${path}" dst-path=go.rsc`;
+  return second
+    ? `:do {${fetch(first!)}} on-error={${fetch(second)}}; /import go.rsc`
+    : `${fetch(first!)}; /import go.rsc`;
+}
+
+/** What go.rsc runs on the router: internet and clock first, then the setup, waiting for it and
+ *  saying plainly whether it finished. */
+function setupStarterScript(provisionToken: string): string {
   const path = `/api/v1/routers/provision/${provisionToken}`;
   // The public address first (every router with internet reaches it once its clock is right),
   // then the router's own address (ROUTER_API_BASE_URL) for a router that can't: whichever
@@ -361,9 +375,12 @@ function setupFetchCommand(provisionToken: string): string {
     `:do {:local r [/tool fetch url=($mkgOk . "/callback") http-method=post keep-result=no as-value]} on-error={}; :delay 2s; ` +
     `:put "Setting up internet, hotspot, sign-in page, RADIUS, PPPoE and VPN. This takes 1-4 minutes: leave this window open..."; ` +
     `:local j [:execute script="/import setup.rsc" file=mkg-setup.txt]; :local c ""; :local done false; ` +
-    `:for i from=1 to=150 do={:if ($done = false) do={:delay 2s; :do {:set c [/file get [find name~"mkg-setup"] contents]} on-error={}; ` +
-    `:if ([:typeof [:find $c "SUCCESS"]] != "nil") do={:set done true}; ` +
-    `:if ($i > 5) do={:if ([:typeof $j] = "id") do={:if ([:len [/system script job find where .id=$j]] = 0) do={:set done true}}}}}; ` +
+    // Follows the job itself (light on a small router); the log is read only when the job can't
+    // be followed (an older RouterOS), and every 6 s rather than every 2.
+    `:for i from=1 to=100 do={:if ($done = false) do={:delay 3s; ` +
+    `:if ([:typeof $j] = "id") do={:if ($i > 2) do={:if ([:len [/system script job find where .id=$j]] = 0) do={:set done true}}} ` +
+    `else={:if (($i % 2) = 0) do={:do {:set c [/file get [find name~"mkg-setup"] contents]} on-error={}; :if ([:typeof [:find $c "SUCCESS"]] != "nil") do={:set done true}}}}}; ` +
+    `:do {:set c [/file get [find name~"mkg-setup"] contents]} on-error={}; ` +
     `:if ([:typeof [:find $c "SUCCESS"]] != "nil") do={:put "DONE: the router is set up. Phones on its Wi-Fi now get the Suntech sign-in page, and it shows Online in Suntech within a minute."} ` +
     `else={:local from 0; :if ([:len $c] > 600) do={:set from ([:len $c] - 600)}; :put "The setup stopped before the end. Its last lines:"; :put [:pick $c $from [:len $c]]; :put "Send these lines to Suntech support, or paste this command again."}}`
   );
@@ -1044,6 +1061,16 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
    * /tool fetch url="https://isp.suntechke.com/api/v1/routers/provision/<token>/setup.rsc" dst-path=setup.rsc; :delay 2s; /import setup.rsc;
    * Serves the generated .rsc script dynamically to the MikroTik router.
    */
+  /** The starter the short setup command downloads and runs (see setupFetchCommand). */
+  app.get("/provision/:token/go.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
+    const { token } = provisionCallbackParamsSchema.parse(request.params);
+    if (!(await findRouterByProvisionToken(token))) {
+      reply.status(404).header("Content-Type", "text/plain").send(':put "This setup command has expired: copy a new one from Suntech."\n');
+      return;
+    }
+    reply.header("Content-Type", "text/plain; charset=utf-8").send(`${setupStarterScript(token)}\n`);
+  });
+
   app.get("/provision/:token/setup.rsc", { config: { audience: "system-critical", rateLimit: false } }, async (request, reply) => {
     const { token } = provisionCallbackParamsSchema.parse(request.params);
     const found = await findRouterByProvisionToken(token);
