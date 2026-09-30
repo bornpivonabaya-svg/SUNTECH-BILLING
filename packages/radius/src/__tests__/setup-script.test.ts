@@ -359,11 +359,32 @@ describe("router health report", () => {
     expect(small).toContain(':do {/system scheduler set [find where name="mkg-heartbeat" and interval!=5m] interval=5m} on-error={}');
     expect(buildHeartbeatScript(callbackUrl, undefined, { checkInEvery: "1m" })).toContain("interval!=1m] interval=1m");
     // Size not known yet: the schedule is left as it is.
-    expect(buildHeartbeatScript(callbackUrl)).not.toContain("/system scheduler set");
+    expect(buildHeartbeatScript(callbackUrl)).not.toContain("interval=");
     // RouterOS 6 small routers (hAP lite on v6) get it too, and stay under 4 KB.
     const v6 = buildHeartbeatScript(`https://api.mashuphost.tech/api/v1/routers/provision/${"a".repeat(64)}/callback`, "https://api.mashuphost.tech/api/v1/hotspot/a-rather-long-isp-name/mikrotik-login-template", { hotspotCheck: false, checkInEvery: "5m" });
     expect(v6).toContain("interval=5m");
     expect(v6.length).toBeLessThan(3950);
+  });
+
+  it("moves an older scheduler to the report's address only once the router has fetched from it (RouterOS 7)", () => {
+    const direct = "https://203.0.113.9:8443/api/v1/routers/provision/tok/callback";
+    const report = buildHeartbeatScript(direct);
+    const move = report.split("\n").find((l) => l.includes("/system scheduler find name=mkg-heartbeat"))!;
+    expect(move).toContain('[:find [/system scheduler get $s on-event] "https://203.0.113.9:8443/api/v1/routers/provision/tok/heartbeat.rsc"]');
+    expect(move).toContain('/tool fetch url="https://203.0.113.9:8443/api/v1/routers/provision/tok/heartbeat.rsc" output=user as-value');
+    expect(move.indexOf("output=user")).toBeLessThan(move.indexOf("/system scheduler set $s on-event="));
+    expect(move).toMatch(/on-error=\{\}$/);
+    // RouterOS 6 keeps its report under 4 KB: no move.
+    expect(buildHeartbeatScript(direct, undefined, { hotspotCheck: false })).not.toContain("/system scheduler find name=mkg-heartbeat");
+  });
+
+  it("reports through the public address when the router's own address can't be reached", () => {
+    const direct = "https://203.0.113.9:8443/api/v1/routers/provision/tok/callback";
+    const pub = "https://isp.example.com/api/v1/routers/provision/tok/callback";
+    const report = buildHeartbeatScript(direct, undefined, { fallbackCallbackUrl: pub });
+    expect(report).toContain(`:do {/tool fetch url="${direct}" http-method=post http-data=$d keep-result=no} on-error={:do {/tool fetch url="${pub}" http-method=post http-data=$d keep-result=no} on-error={}}`);
+    // Same address: a single attempt.
+    expect(buildHeartbeatScript(pub, undefined, { fallbackCallbackUrl: pub })).not.toContain("on-error={:do {/tool fetch");
   });
 
   it("puts back a missing management VPN piece by piece, and reports the router's key (RouterOS 7)", () => {

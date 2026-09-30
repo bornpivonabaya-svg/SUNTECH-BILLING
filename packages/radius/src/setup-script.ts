@@ -572,6 +572,23 @@ const HEARTBEAT_LOCK_OPEN =
   `:if ($mkgRun) do={:set mkgHbBusy $mkgUp`;
 const HEARTBEAT_LOCK_CLOSE = `:set mkgHbBusy ""}`;
 
+/**
+ * Points the mkg-heartbeat scheduler at this report's address when it still uses another one (set
+ * up before the server's address changed, e.g. before routers went to the server directly rather
+ * than through Cloudflare). It moves only after the router has fetched the report from the new
+ * address once, so a router that can't reach it keeps the address that works. Nothing is written
+ * once the scheduler is right.
+ */
+function schedulerMove(callbackUrl: string): string {
+  const url = heartbeatScriptUrl(callbackUrl);
+  return (
+    `:do {:local s [/system scheduler find name=mkg-heartbeat]; ` +
+    `:if ([:len $s] = 1) do={:if ([:typeof [:find [/system scheduler get $s on-event] "${url}"]] = "nil") do={` +
+    `:local t [/tool fetch url="${url}" output=user as-value]; ` +
+    `:if ([:len ($t->"data")] > 100) do={/system scheduler set $s on-event="${heartbeatOnEvent(callbackUrl)}"}}}} on-error={}`
+  );
+}
+
 /** Sets the mkg-heartbeat scheduler to this interval when it runs at another one. */
 export function checkInInterval(every: "1m" | "5m"): string {
   return `:do {/system scheduler set [find where name="mkg-heartbeat" and interval!=${every}] interval=${every}} on-error={}`;
@@ -707,6 +724,9 @@ export function buildHeartbeatScript(
     radiusHost?: string | null;
     /** The router's RADIUS shared secret, so a missing or wrong entry is repaired (RouterOS 7). */
     radiusSecret?: string | null;
+    /** Where the report goes when callbackUrl can't be reached (the public API address, when
+     *  routers are normally sent to another one such as the server's own address). */
+    fallbackCallbackUrl?: string | null;
   } = {}
 ): string {
   const get = (field: string) => `[/system resource get ${field}]`;
@@ -761,7 +781,11 @@ export function buildHeartbeatScript(
     ...(options.hotspotCheck === false ? [] : [HOTSPOT_CHECK]),
     // The router's WireGuard key, so the platform registers it again if it changed or was lost.
     ...(options.hotspotCheck === false ? [] : [`:do {:local k [:parse ":return [/interface wireguard get [find name=mkg-wg] public-key]"]; :set d ($d . "&wgkey=" . [$k])} on-error={}`]),
-    `:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no} on-error={}`,
+    // RouterOS 7: a router still fetching its report from an older address moves to this one.
+    ...(options.hotspotCheck === false ? [] : [schedulerMove(callbackUrl)]),
+    options.fallbackCallbackUrl && options.fallbackCallbackUrl !== callbackUrl
+      ? `:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no} on-error={:do {/tool fetch url="${options.fallbackCallbackUrl}" http-method=post http-data=$d keep-result=no} on-error={}}`
+      : `:do {/tool fetch url="${callbackUrl}" http-method=post http-data=$d keep-result=no} on-error={}`,
     HEARTBEAT_LOCK_CLOSE,
     `}`,
     "",

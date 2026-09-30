@@ -1134,6 +1134,9 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
         radiusSecret: isV6 ? null : (await getGeneratedCredentials(router.tenantId, router.id).catch(() => null))?.password ?? null,
         // The router compares its pages with these sizes: no need to read the files.
         pageSizes: tenant ? portalPageSizes(tenant.slug, tenant.name) : undefined,
+        // If the router can't reach its own address (ROUTER_API_BASE_URL), it reports through the
+        // public one instead of going silent.
+        fallbackCallbackUrl: `${env.APP_API_PUBLIC_URL.replace(/\/+$/, "")}/api/v1/routers/provision/${token}/callback`,
       })
     );
   });
