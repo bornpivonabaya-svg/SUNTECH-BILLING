@@ -139,6 +139,19 @@ describe("router setup script — one rejected command can't stop the rest", () 
     expect(script).toContain('list="mashup-dest-portal" address=192.168.1.183');
   });
 
+  it("installs the sign-in page and the portal's addresses early, before anything that can stop the script", () => {
+    const own = buildMikrotikProvisioningScript(router, credentials, callbackUrl, {
+      portalHost: "https://captive.suntechke.com",
+      loginTemplateUrl: "https://isp.suntechke.com/api/v1/hotspot/nexus/mikrotik-login-template",
+    });
+    const at = (needle: string) => own.indexOf(needle);
+    expect(own).toContain('/tool fetch url="https://isp.suntechke.com/api/v1/hotspot/nexus/mikrotik-login-template" dst-path=hotspot/login.html');
+    expect(at("dst-path=hotspot/login.html")).toBeLessThan(at("dhcp-server"));
+    expect(at("html-directory=hotspot use-radius=yes login-by=mac,http-chap,http-pap,cookie")).toBeLessThan(at("dhcp-server"));
+    expect(at("*.suntechke.com")).toBeGreaterThan(-1);
+    expect(at("*.suntechke.com")).toBeLessThan(at("dhcp-server"));
+  });
+
   it("adds the check-in before anything that can stop the script, and still sets up the VPN after the walled garden", () => {
     const at = (needle: string) => script.indexOf(needle);
     // A setup cut short (a crash on a small router) must still leave the self-repairing check-in.

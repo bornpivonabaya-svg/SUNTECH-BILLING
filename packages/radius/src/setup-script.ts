@@ -449,6 +449,11 @@ ${versionSection}
 :do {/system scheduler remove [find name=mkg-heartbeat]} on-error={}
 :do {/system scheduler add name=mkg-heartbeat interval=1m on-event="${heartbeatOnEvent(callbackUrl)}"} on-error={}
 
+# The sign-in page and the addresses a phone needs before signing in, early too, so a hotspot this
+# router already runs shows the ISP's page even if the setup stops further down. Repeated (and
+# completed) with the hotspot section below and on every check-in.
+${portalEssentials(loginTemplateUrl, [portalHost, apiHost])}
+
 # The platform's management account comes first, before anything that can drop the session
 # running this script — without it the router is linked but can never be managed.
 :do {/user remove [find name=${credentials.username}]} on-error={}
@@ -555,6 +560,34 @@ ${osMajor === 6 ? "" : `${deferred(`/interface wifi set [find default-name=wifi1
 /** The report script's address: next to the callback, same token. */
 export function heartbeatScriptUrl(callbackUrl: string): string {
   return callbackUrl.replace(/\/callback$/, "/heartbeat.rsc");
+}
+
+/** The domain a host belongs to ("captive.suntechke.com" → "suntechke.com"; "portal.isp.co.ke"
+ *  → "isp.co.ke"), for one walled-garden wildcard that covers the ISP's other addresses. */
+export function parentDomain(host: string): string | null {
+  const labels = host.toLowerCase().split(".").filter(Boolean);
+  if (labels.length < 2 || /^[0-9.]+$/.test(host)) return null;
+  const secondLevel = /^(co|or|ac|go|ne|com|net|org|gov|edu|sc|me)$/;
+  const keep = labels.length >= 3 && labels[labels.length - 1]!.length === 2 && secondLevel.test(labels[labels.length - 2]!) ? 3 : 2;
+  return labels.slice(-keep).join(".");
+}
+
+/**
+ * The three things a phone needs to see the ISP's sign-in page: the page itself in the hotspot's
+ * folder, hotspot profiles that serve it and ask RADIUS, and the portal/API addresses (plus their
+ * domain) reachable before sign-in. Each line on its own, so one failure can't stop the others.
+ */
+export function portalEssentials(loginTemplateUrl: string, hosts: readonly string[]): string {
+  const names = [...new Set(hosts.map((h) => h.trim().toLowerCase()).filter((h) => /^[a-z0-9.-]+$/.test(h)))];
+  const domains = [...new Set(names.map(parentDomain).filter((d): d is string => Boolean(d)))].map((d) => `*.${d}`);
+  const garden = [...names, ...domains].map((h) => `"${h}"`).join(";");
+  return [
+    `:do {/tool fetch url="${loginTemplateUrl}" dst-path=hotspot/login.html check-certificate=no} on-error={}`,
+    `:do {/ip hotspot profile set [find] html-directory=hotspot use-radius=yes login-by=mac,http-chap,http-pap,cookie} on-error={}`,
+    ...(garden
+      ? [deferred(`:foreach h in={${garden}} do={:if ([:len [/ip hotspot walled-garden find dst-host=$h]] = 0) do={/ip hotspot walled-garden add dst-host=$h comment="MASHUPKGRID"}}`)]
+      : []),
+  ].join("\n");
 }
 
 /** The mkg-heartbeat scheduler's script, escaped to sit inside on-event="…" of the setup script. */
