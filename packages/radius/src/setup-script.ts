@@ -458,15 +458,18 @@ ${versionSection}
 :do {/ip dns set servers=1.1.1.1,8.8.8.8} on-error={}
 
 # LAN, Wi-Fi and WAN baseline. Existing configurations are preserved when present.
-:do {/interface bridge add name=bridge} on-error={}
+${deferred(`:if ([:len [/interface bridge find name=bridge]] = 0) do={/interface bridge add name=bridge}`)}
 ${cleanupExcludedPorts ? `${cleanupExcludedPorts}\n` : ""}${bridgePortLines}
-:do {/ip dhcp-client add interface=ether1 disabled=no add-default-route=yes use-peer-dns=yes} on-error={}
-:do {/ip address add address=192.168.88.1/24 interface=bridge} on-error={}
-:do {/ip pool add name=default-dhcp ranges=192.168.88.10-192.168.88.254} on-error={}
-:do {/ip dhcp-server add name=mkg-dhcp interface=bridge address-pool=default-dhcp disabled=no} on-error={}
-:do {/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1} on-error={}
+# Each of these is added only when missing. Adding one that already exists is not just an error:
+# on RouterOS 7.24 a second DHCP server on the bridge crashed the console and stopped the setup
+# there, before the hotspot and sign-in page.
+${deferred(`:if ([:len [/ip dhcp-client find interface=ether1]] = 0) do={/ip dhcp-client add interface=ether1 disabled=no add-default-route=yes use-peer-dns=yes}`)}
+${deferred(`:if ([:len [/ip address find interface=bridge]] = 0) do={/ip address add address=192.168.88.1/24 interface=bridge}`)}
+${deferred(`:if ([:len [/ip pool find name=default-dhcp]] = 0) do={/ip pool add name=default-dhcp ranges=192.168.88.10-192.168.88.254}`)}
+${deferred(`:if ([:len [/ip dhcp-server find interface=bridge]] = 0) do={/ip dhcp-server add name=mkg-dhcp interface=bridge address-pool=default-dhcp disabled=no} else={/ip dhcp-server enable [find interface=bridge]}`)}
+${deferred(`:if ([:len [/ip dhcp-server network find]] = 0) do={/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1}`)}
 :do {/ip dns set allow-remote-requests=yes} on-error={}
-:do {/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="MASHUPKGRID"} on-error={}
+${deferred(`:if ([:len [/ip firewall nat find comment="MASHUPKGRID" out-interface=ether1]] = 0) do={/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="MASHUPKGRID"}`)}
 ${PRIVATE_LIST_LINES.map((l) => `:do {${l}} on-error={}`).join("\n")}
 :do {/ip firewall nat remove [find comment="${LAN_NAT_COMMENT}"]} on-error={}
 :do {${LAN_NAT_RULE}} on-error={}
@@ -490,7 +493,8 @@ ${buildManagementAccessSection(managementSources({ managementSource, vpnSubnet }
 ${deferred(`:if ([:len [/file find name="hotspot/login.html"]] = 0) do={/ip hotspot reset-html}`)}
 :do {/ip hotspot user profile set [find default=yes] shared-users=1} on-error={}
 :do {/ip hotspot remove [find name=mkg-hotspot]} on-error={}
-:do {/ip hotspot add name=mkg-hotspot interface=bridge address-pool=default-dhcp profile=default disabled=no} on-error={}
+# Only when the bridge has no hotspot yet (one set up by hand is kept, and enabled above).
+${deferred(`:if ([:len [/ip hotspot find interface=bridge]] = 0) do={/ip hotspot add name=mkg-hotspot interface=bridge address-pool=default-dhcp profile=default disabled=no}`)}
 :do {/ip hotspot walled-garden remove [find comment="MASHUPKGRID"]} on-error={}
 :do {/ip hotspot walled-garden ip remove [find comment="MASHUPKGRID"]} on-error={}
 ${walledGardenLines(walledGardenHosts)}
