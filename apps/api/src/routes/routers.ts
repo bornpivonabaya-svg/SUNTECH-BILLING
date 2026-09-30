@@ -344,15 +344,31 @@ const ENSURE_INTERNET =
  *  setup after it. The import runs as a background job (:execute) — see the provisioning-script
  *  route — with its output in mkg-setup.txt on the router. */
 function setupFetchCommand(provisionToken: string): string {
-  const provisionBase = `${routerApiBase()}/api/v1/routers/provision/${provisionToken}`;
-  // Up to three tries, a few seconds apart: the first can fail while the clock is still syncing.
+  const path = `/api/v1/routers/provision/${provisionToken}`;
+  // The router's own address first (ROUTER_API_BASE_URL), then the public one: some routers can't
+  // reach one of them (a TLS version, a blocked port, a proxy), and the setup must still arrive.
+  // Whichever answered is used for the rest, and setup.rsc then points the router at it too.
+  const bases = [...new Set([routerApiBase(), publicApiBase()])].map((b) => `"${b}${path}"`).join(";");
+  // Two tries per address, a few seconds apart: the first can fail while the clock is still syncing.
   return (
-    `${ENSURE_INTERNET}:local mkgOk false; ` +
-    `:for i from=1 to=3 do={:if ($mkgOk = false) do={:do {/tool fetch url="${provisionBase}/setup.rsc" dst-path=setup.rsc; :set mkgOk true} on-error={:delay 4s}}}; ` +
-    `:if ($mkgOk = false) do={:put "Could not download the setup: check the router's internet and clock (/system clock print), then paste this command again."} else={` +
-    `:do {/tool fetch url="${provisionBase}/callback" http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; ` +
+    `${ENSURE_INTERNET}:local mkgOk ""; ` +
+    `:foreach b in={${bases}} do={:for i from=1 to=2 do={:if ($mkgOk = "") do={:do {/tool fetch url=($b . "/setup.rsc") dst-path=setup.rsc; :set mkgOk $b} on-error={:delay 3s}}}}; ` +
+    `:if ($mkgOk = "") do={:put "Could not download the setup: check the router's internet and clock (/system clock print), then paste this command again."} else={` +
+    `:do {/tool fetch url=($mkgOk . "/callback") http-method=post keep-result=no} on-error={}; :delay 2s; :execute script="/import setup.rsc" file=mkg-setup.txt; ` +
     `:put "Setup is running on the router. It shows Online in Suntech within a minute."}`
   );
+}
+
+/** The API's public address (through the CDN), which every router with internet can reach. */
+function publicApiBase(): string {
+  return env.APP_API_PUBLIC_URL.replace(/\/+$/, "");
+}
+
+/** The address a router should use from here on: the public one when this request came through
+ *  it (Cloudflare adds cf-connecting-ip), so a router that couldn't reach its own address isn't
+ *  sent back to it; otherwise the router's own address. */
+function routerBaseFor(request: { headers: Record<string, string | string[] | undefined> }): string {
+  return request.headers["cf-connecting-ip"] ? publicApiBase() : routerApiBase();
 }
 
 export async function routerRoutes(app: FastifyInstance): Promise<void> {
@@ -687,17 +703,7 @@ export async function routerRoutes(app: FastifyInstance): Promise<void> {
         );
       }
 
-      let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
-      if (!serverPublicKey) {
-        try {
-          const { execFileSync } = await import("node:child_process");
-          serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], {
-            encoding: "utf-8",
-          }).trim();
-        } catch {
-          serverPublicKey = "";
-        }
-      }
+      const { serverPublicKey } = await wireguardServer();
 
       const script = buildMikrotikVpnCompleteScript({
         serverPublicKey,
@@ -1040,31 +1046,23 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     const managementSource = env.ROUTER_MANAGEMENT_SOURCE || (await platformPublicAddress());
     const vpnIp = await ensureRouterVpnIp(router.id);
 
-    let serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
-    if (!serverPublicKey) {
-      try {
-        const { execFileSync } = await import("node:child_process");
-        serverPublicKey = execFileSync("wg", ["show", env.WIREGUARD_INTERFACE, "public-key"], {
-          encoding: "utf-8",
-        }).trim();
-      } catch {
-        serverPublicKey = "";
-      }
-    }
+    // The key the server's VPN really runs with (a stale or placeholder setting is skipped).
+    const { serverPublicKey } = await wireguardServer();
 
     const serverHost = env.WIREGUARD_SERVER_ENDPOINT
       ? (env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0] : env.WIREGUARD_SERVER_ENDPOINT)
       : await platformPublicAddress();
 
     const credentials = await getGeneratedCredentials(router.tenantId, router.id);
-    const callbackUrl = `${routerApiBase()}/api/v1/routers/provision/${token}/callback`;
+    const base = routerBaseFor(request);
+    const callbackUrl = `${base}/api/v1/routers/provision/${token}/callback`;
     // Same reasoning as the provisioning-script route above — never guess the tenant.
     const tenantSlug = router.tenant?.slug;
     if (!tenantSlug) {
       reply.status(500).header("Content-Type", "text/plain").send("# Error: router is not linked to a tenant\n");
       return;
     }
-    const loginTemplateUrl = `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`;
+    const loginTemplateUrl = `${base}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`;
 
     const script = buildMikrotikProvisioningScript(router, credentials, callbackUrl, {
       radiusHost: await routerRadiusHost(),
@@ -1117,7 +1115,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
     const tenant = await prisma.tenant.findUnique({ where: { id: router.tenantId }, select: { slug: true, name: true } });
     const tenantSlug = tenant?.slug;
     const loginTemplateUrl = tenantSlug
-      ? `${routerApiBase()}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
+      ? `${routerBaseFor(request)}/api/v1/hotspot/${tenantSlug}/mikrotik-login-template`
       : undefined;
     // RouterOS 6's fetch returns at most 4 KB, too little for the hotspot self-check as well.
     const isV6 = Boolean(router.routerOsVersion?.startsWith("6"));
@@ -1136,7 +1134,7 @@ function getClientIp(request: { headers: Record<string, string | string[] | unde
         pageSizes: tenant ? portalPageSizes(tenant.slug, tenant.name) : undefined,
         // If the router can't reach its own address (ROUTER_API_BASE_URL), it reports through the
         // public one instead of going silent.
-        fallbackCallbackUrl: `${env.APP_API_PUBLIC_URL.replace(/\/+$/, "")}/api/v1/routers/provision/${token}/callback`,
+        fallbackCallbackUrl: `${publicApiBase()}/api/v1/routers/provision/${token}/callback`,
       })
     );
   });
