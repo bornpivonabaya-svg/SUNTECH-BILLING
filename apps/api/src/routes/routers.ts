@@ -197,7 +197,10 @@ async function wireguardServer(): Promise<{ serverPublicKey: string; serverHost:
   } catch {
     serverPublicKey = "";
   }
-  if (!serverPublicKey) serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY;
+  // `wg show` prints "(none)" for an interface without a key, and the .env example ships a
+  // placeholder: neither may reach a router as the server's key.
+  if (!WIREGUARD_PUBLIC_KEY_PATTERN.test(serverPublicKey)) serverPublicKey = env.WIREGUARD_SERVER_PUBLIC_KEY ?? "";
+  if (!WIREGUARD_PUBLIC_KEY_PATTERN.test(serverPublicKey)) serverPublicKey = "";
   const serverHost = env.WIREGUARD_SERVER_ENDPOINT
     ? env.WIREGUARD_SERVER_ENDPOINT.includes(":") ? env.WIREGUARD_SERVER_ENDPOINT.split(":")[0]! : env.WIREGUARD_SERVER_ENDPOINT
     : await platformPublicAddress();
