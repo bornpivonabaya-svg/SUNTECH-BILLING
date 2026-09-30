@@ -139,9 +139,12 @@ describe("router setup script — one rejected command can't stop the rest", () 
     expect(script).toContain('list="mashup-dest-portal" address=192.168.1.183');
   });
 
-  it("still sets up the heartbeat and the VPN after the walled garden", () => {
+  it("adds the check-in before anything that can stop the script, and still sets up the VPN after the walled garden", () => {
     const at = (needle: string) => script.indexOf(needle);
-    expect(at("mkg-heartbeat")).toBeGreaterThan(at("walled-garden"));
+    // A setup cut short (a crash on a small router) must still leave the self-repairing check-in.
+    expect(at("/system scheduler add name=mkg-heartbeat")).toBeGreaterThan(-1);
+    expect(at("/system scheduler add name=mkg-heartbeat")).toBeLessThan(at("dhcp-server"));
+    expect(at("/system scheduler add name=mkg-heartbeat")).toBeLessThan(at("walled-garden"));
     expect(at("/interface wireguard add name=mkg-wg")).toBeGreaterThan(at("walled-garden"));
   });
 });

@@ -441,6 +441,14 @@ ${deferred(`/interface wireguard remove [find name=mkg-wg]
 ${versionSection}
 :do {/tool fetch url="${callbackUrl}" http-method=post keep-result=no} on-error={}
 
+# The once-a-minute check-in comes right after the first contact, before anything that could stop
+# this script: its report (buildHeartbeatScript) repairs the sign-in page, walled garden, DNS
+# rules, RADIUS and VPN by itself, so a setup cut short on a small router (out of memory, a
+# RouterOS bug) still ends with a working hotspot a minute later instead of one that blocks
+# every phone. Survives reboots and is safe to re-run.
+:do {/system scheduler remove [find name=mkg-heartbeat]} on-error={}
+:do {/system scheduler add name=mkg-heartbeat interval=1m on-event="${heartbeatOnEvent(callbackUrl)}"} on-error={}
+
 # The platform's management account comes first, before anything that can drop the session
 # running this script — without it the router is linked but can never be managed.
 :do {/user remove [find name=${credentials.username}]} on-error={}
@@ -513,8 +521,7 @@ ${UNPAID_DNS_RULES.map((rule) => `:do {${rule}} on-error={}`).join("\n")}
 # (never onto flash) and runs it: CPU, memory, disk, temperature, uptime, users — see
 # buildHeartbeatScript. If that fails for any reason, it still checks in plainly, so the router
 # never shows Offline because of the report. Survives reboots and is safe to re-run.
-:do {/system scheduler remove [find name=mkg-heartbeat]} on-error={}
-:do {/system scheduler add name=mkg-heartbeat interval=1m on-event="${heartbeatOnEvent(callbackUrl)}"} on-error={}
+# (The mkg-heartbeat check-in is added at the top of this script: see there.)
 
 # Automated NTP Time Synchronization
 :do {/system clock set time-zone-autodetect=yes time-zone-name=Africa/Nairobi} on-error={}
