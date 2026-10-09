@@ -42,3 +42,6 @@ scratch/
 # persisted by the `captive_portal_data` volume in docker-compose.prod.yml. Committing them
 # meant a deploy silently restored a developer's copy over whatever the ISP had saved.
 apps/api/data/
+
+# Vitest temp bundles
+*.timestamp-*.mjs

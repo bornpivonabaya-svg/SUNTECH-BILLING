@@ -161,7 +161,9 @@ export class WhatsAppSessionManager {
     if (options.forceClean) {
       try {
         fs.rmSync(sessionDir, { recursive: true, force: true });
-      } catch {}
+      } catch (err) {
+        console.warn(`[whatsapp] failed to clear auth for ${id}:`, err);
+      }
     }
 
     const session: TenantSession = { socket: null, stopping: false };
@@ -225,7 +227,9 @@ export class WhatsAppSessionManager {
           this.sessions.delete(id);
           try {
             fs.rmSync(sessionDir, { recursive: true, force: true });
-          } catch {}
+          } catch (err) {
+            console.warn(`[whatsapp] failed to clear auth for ${id} after logout:`, err);
+          }
           return;
         }
         this.events.onDisconnected?.(id, "reconnecting");
@@ -280,7 +284,9 @@ export class WhatsAppSessionManager {
     if (options.deleteAuth) {
       try {
         fs.rmSync(path.join(this.baseAuthPath, id), { recursive: true, force: true });
-      } catch {}
+      } catch (err) {
+        console.warn(`[whatsapp] failed to delete auth for ${id}:`, err);
+      }
     }
   }
 
