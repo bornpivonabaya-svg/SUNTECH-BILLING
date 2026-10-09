@@ -194,7 +194,9 @@ export async function startWhatsAppRuntime(): Promise<WhatsAppSessionManager> {
         }
       }
     }
-  } catch {}
+  } catch (err) {
+    console.warn("[whatsapp] failed to scan saved sessions for restore:", err);
+  }
 
   for (const tenantId of restoreTenants) {
     try {
