@@ -262,7 +262,7 @@ export function CustomerPortal({ view = "all", onPay }: { view?: PortalView; onP
         </Notice>
       )}
 
-      {show("home") && <MetricGrid columns={4}>
+      {show("home") && <MetricGrid columns={2}>
         <Metric
           label={t.internet}
           value={primary ? (serviceOn ? t.on : primary.status === "SUSPENDED" ? t.suspended : primary.status) : t.noPlan}

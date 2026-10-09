@@ -50,8 +50,11 @@ export function Panel({
   );
 }
 
-export function MetricGrid({ children, columns = 4 }: { children: ReactNode; columns?: 3 | 4 | 5 | 6 }) {
+export function MetricGrid({ children, columns = 4 }: { children: ReactNode; columns?: 2 | 3 | 4 | 5 | 6 }) {
   const cols =
+    // Two stays two at every width: for narrow columns (the customer portal) where a wide
+    // viewport would otherwise squeeze four money values until they break mid-number.
+    columns === 2 ? "" :
     // Six money-sized numbers do not fit six columns on a laptop; two rows of three read better.
     columns === 6 ? "lg:grid-cols-3" : columns === 5 ? "lg:grid-cols-3 xl:grid-cols-5" : columns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4";
   return <div className={`grid grid-cols-2 gap-3 ${cols}`}>{children}</div>;
